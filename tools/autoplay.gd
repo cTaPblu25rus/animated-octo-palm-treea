@@ -150,7 +150,7 @@ func _react(e: Enemy) -> void:
 		return
 	var window: float = float(game.p.parry_window)
 	var kind: String = REACTIONS[_reaction % REACTIONS.size()]
-	if kind == "block" and game.skill_ready(0):
+	if kind == "block" and game.skill_ready(0) and int(game.stats.blocks) > 0:
 		# Удар щитом прерывает замах
 		_reacted_windup = true
 		_reaction += 1

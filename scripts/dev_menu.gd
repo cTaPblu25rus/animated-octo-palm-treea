@@ -304,7 +304,8 @@ func _talents() -> void:
 
 
 func _cooldowns() -> void:
-	game.skill_cd = [0.0, 0.0, 0.0]
+	for i in game.skill_cd.size():
+		game.skill_cd[i] = 0.0
 
 
 func _forge() -> void:
