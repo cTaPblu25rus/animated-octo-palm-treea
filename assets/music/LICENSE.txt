@@ -9,3 +9,7 @@ fight.ogg    — «Battle Theme A»
                https://opengameart.org/content/battle-theme-a
 boss.ogg     — «Epic Boss Battle [Seamlessly Looping]», Juhani Junkala
                https://opengameart.org/content/boss-battle-music
+
+game.ogg     — основная тема забега. Сгенерирована в Gemini и прислана автором проекта.
+               Перед выпуском проверить условия Google на коммерческое использование.
+               Треки dungeon.ogg и fight.ogg остаются в проекте как запасные.

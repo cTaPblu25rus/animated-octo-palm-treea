@@ -21,6 +21,7 @@
 Четыре трека с OpenGameArt.org, все под CC0: тема меню (cynicmusic), подземелье
 («Great Labyrinth»), бой («Battle Theme A»), босс (Juhani Junkala). Ссылки —
 в `assets/music/LICENSE.txt`.
+Основная тема забега (`game.ogg`) сгенерирована в Gemini автором проекта.
 
 ## Озвучка
 Реплики в `assets/voice/` синтезированы программой [Piper](https://github.com/OHF-Voice/piper1-gpl)
