@@ -28,6 +28,8 @@ var _shot_t := 0.0
 var _shot_n := 0
 var _last_windup := -1
 var _room_t := 0.0
+var _fx_seen := {}
+var _fx_shots: Array = []
 
 
 func _ready() -> void:
@@ -48,6 +50,17 @@ func _process(delta: float) -> void:
 		return
 	t += delta
 	if shots_dir != "":
+		# Кадры эффектов: через мгновение после крита, парирования и полученного удара
+		for key: String in ["crits", "parries", "hurt"]:
+			var n := int(game.stats[key])
+			if n != int(_fx_seen.get(key, 0)):
+				_fx_seen[key] = n
+				_fx_shots.append([0.09, "%s_%d" % [key, n]])
+		for i in range(_fx_shots.size() - 1, -1, -1):
+			_fx_shots[i][0] -= delta
+			if _fx_shots[i][0] <= 0.0:
+				_shot(_fx_shots[i][1])
+				_fx_shots.remove_at(i)
 		_shot_t += delta
 		if _shot_t > 0.7:
 			_shot_t = 0.0

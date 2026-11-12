@@ -1,0 +1,4 @@
+Текстуры Poly Haven (polyhaven.com), лицензия CC0.
+castle_brick_07, cobblestone_floor_08 — 1k, diffuse + normal (OpenGL).
+https://polyhaven.com/a/castle_brick_07
+https://polyhaven.com/a/cobblestone_floor_08

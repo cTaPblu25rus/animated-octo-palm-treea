@@ -15,6 +15,7 @@ const SettingsMenu := preload("res://scripts/settings_menu.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const MetaUi := preload("res://scripts/meta_ui.gd")
+const PixelShader := preload("res://shaders/pixel.gdshader")
 const ITEMS_PATH := "res://data/items.json"
 const HERO_MODELS := "res://assets/kaykit/hero/"
 
@@ -89,7 +90,7 @@ var _run_rng := RandomNumberGenerator.new()
 
 ## Счётчики для автоигрока и итогового экрана.
 var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
-	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "taken": 0.0, "hurt": 0, "kills": 0}
+	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "crits": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
 var dev_menu: CanvasLayer
@@ -98,9 +99,18 @@ var meta_ui: CanvasLayer
 var items: Dictionary = {}      # data/items.json
 var weapon: Dictionary = {}     # вид текущего оружия из items.weapons
 var _sword_model: Node3D
+var _last_struck_side := 0
+var _chip_pool: Array[CPUParticles3D] = []
+var _chip_next := 0
+var _hitstop_base := -1.0
 var _loot_then := ""            # что делать после выбора добычи: cleared | cutscene
 var style: Dictionary = {}      # параметры текущего стиля графики, читает HUD
 var _lantern: OmniLight3D
+var _wall_nodes: Array[Node3D] = []
+var _floor_nodes: Array[Node3D] = []
+var _stone_wall: StandardMaterial3D
+var _stone_floor: StandardMaterial3D
+var _pixel_rect: ColorRect
 var hud: CanvasLayer
 var sfx: Node
 var camera: Camera3D
@@ -165,6 +175,17 @@ func _ready() -> void:
 	recalc()
 	hp = max_hp
 	stamina = max_stamina
+	var pixel_layer := CanvasLayer.new()
+	pixel_layer.layer = 0
+	add_child(pixel_layer)
+	_pixel_rect = ColorRect.new()
+	_pixel_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pixel_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pixel_mat := ShaderMaterial.new()
+	pixel_mat.shader = PixelShader
+	_pixel_rect.material = pixel_mat
+	_pixel_rect.visible = false
+	pixel_layer.add_child(_pixel_rect)
 	settings_menu = SettingsMenu.new()
 	settings_menu.game = self
 	add_child(settings_menu)
@@ -244,6 +265,7 @@ func _spawn_next() -> void:
 	add_child(enemy)
 	enemy.setup(id, cfg.enemies[id], _run_rng.randi())
 	enemy.parry_window = float(p.parry_window)
+	enemy.set_realistic(bool(style.realistic))
 	enemy.windup_started.connect(_on_windup)
 	enemy.struck.connect(_on_struck)
 	enemy.stunned.connect(_on_stunned)
@@ -284,6 +306,7 @@ func _on_died() -> void:
 
 ## Враг ударил. Исход решают уклонение, блок и стойкость игрока.
 func _on_struck(side: int, damage: float) -> void:
+	_last_struck_side = side
 	if state != "fight":
 		return
 	var side_dir := -1 if side == Enemy.Side.LEFT else (1 if side == Enemy.Side.RIGHT else 0)
@@ -319,6 +342,7 @@ func _take_damage(dmg: float) -> void:
 	stats.hurt += 1
 	sfx.play("hurt")
 	hud.hurt_flash()
+	hud.fx_hurt(_last_struck_side)
 	_shake = maxf(_shake, 0.8)
 	_buzz(80)
 	if hp <= 0.0:
@@ -557,6 +581,44 @@ func apply_style() -> void:
 		t.light_color = style.torch
 	_set_dawn(dawn)
 
+	# Пиксельный стиль: шейдер поверх 3D-сцены, под интерфейсом
+	var px := float(style.pixel)
+	_pixel_rect.visible = px > 0.0
+	if px > 0.0:
+		(_pixel_rect.material as ShaderMaterial).set_shader_parameter("pixel_size", px)
+
+	# Реалистичный стиль: каменная кладка вместо мультяшных текстур, скелеты с человеческими пропорциями
+	var realistic := bool(style.realistic)
+	if realistic and _stone_wall == null:
+		_stone_wall = _stone("castle_brick_07", 0.42)
+		_stone_floor = _stone("cobblestone_floor_08", 0.5)
+	for n in _wall_nodes:
+		_override(n, _stone_wall if realistic else null)
+	for n in _floor_nodes:
+		_override(n, _stone_floor if realistic else null)
+	if enemy != null:
+		enemy.set_realistic(realistic)
+
+
+## Камень Poly Haven с трипланарной развёрткой: ложится на любые модули без своих UV.
+func _stone(tex_name: String, uv_scale: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load("res://assets/polyhaven/%s_diff.jpg" % tex_name)
+	m.normal_enabled = true
+	m.normal_texture = load("res://assets/polyhaven/%s_nor_gl.jpg" % tex_name)
+	m.uv1_triplanar = true
+	m.uv1_world_triplanar = true
+	m.uv1_scale = Vector3.ONE * uv_scale
+	m.roughness = 0.95
+	return m
+
+
+func _override(node: Node, mat: Material) -> void:
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).material_override = mat
+	for c in node.get_children():
+		_override(c, mat)
+
 
 # ============================================================ для меню разработчика
 
@@ -732,6 +794,10 @@ func _swipe(side: int) -> void:
 			sfx.play("parry")
 			hud.say("Парирование!", Color(1.0, 0.95, 0.7), 0.9)
 			_sword_move(_parry_pose(side), 0.12)
+			var clash := enemy.global_position + Vector3(0, 1.3 * enemy.scale.y, 0.9)
+			hud.fx_parry(clash)
+			_chips(clash, 10, Color(1.0, 0.85, 0.4))
+			_hitstop(0.07)
 			_shake = maxf(_shake, 0.3)
 			_buzz(15)
 			_buzz_later(15, 0.08)
@@ -758,6 +824,10 @@ func _attack(side: int, mult: float) -> void:
 	var stg := float(p.weak_stagger) if weak else float(p.off_stagger)
 	if enemy.state == Enemy.State.STUNNED:
 		dmg *= float(p.stun_mult)
+	var crit := weak and _rng.randf() < float(p.crit_chance)
+	if crit:
+		dmg *= float(p.crit_mult)
+		stats.crits += 1
 	dmg *= mult * damage_mult
 	if DevMenu.flag("one_hit"):
 		dmg = enemy.hp + 1.0
@@ -766,12 +836,24 @@ func _attack(side: int, mult: float) -> void:
 	stats.hits += 1
 	if weak:
 		stats.weak_hits += 1
-	sfx.play("crit" if weak else "hit", 0.0, 1.0 if mult <= 1.0 else 0.8)
+	sfx.play("crit" if weak else "hit", 2.0 if crit else 0.0, (1.0 if mult <= 1.0 else 0.8) * (0.85 if crit else 1.0))
 	sfx.play("swing", -8.0)
-	hud.popup("%d" % roundi(dmg), enemy.global_position + Vector3(0, 1.4, 0),
-		Color(1.0, 0.85, 0.3) if weak else Color(0.85, 0.85, 0.85), mult > 1.0 or weak)
+	if crit:
+		sfx.play("parry", -5.0, 1.5)
+	var hit_pos := enemy.global_position + Vector3(0, 1.25 * enemy.scale.y, 0.3)
+	var num_color := Color(0.85, 0.85, 0.85)
+	if weak:
+		num_color = Color(1.0, 0.85, 0.3)
+	if crit:
+		num_color = Color(1.0, 0.45, 0.2)
+	hud.popup("%d" % roundi(dmg), hit_pos + Vector3(0, 0.25, 0), num_color, mult > 1.0 or weak, crit)
+	hud.fx_hit(hit_pos, side, weak, crit, mult > 1.0, Items.color(items, Save.data.weapon))
+	_chips(hit_pos, 14 if crit or mult > 1.0 else (8 if weak else 4))
 	_shake = maxf(_shake, 0.25 if mult <= 1.0 else 0.55)
-	_buzz(12 if mult <= 1.0 else 35)
+	if crit:
+		_shake = maxf(_shake, 0.7)
+	_hitstop(0.11 if crit else (0.08 if mult > 1.0 else (0.045 if weak else 0.0)))
+	_buzz(12 if mult <= 1.0 and not crit else 40)
 
 
 func _release_charge() -> void:
@@ -803,6 +885,54 @@ func _dodge(dir: int) -> void:
 	dodge_dir = dir
 	block_t = 0.0
 	sfx.play("dodge", -4.0)
+
+
+## Осколки костей и искры из точки удара: пул из четырёх излучателей, без создания нод в бою.
+func _chips(pos: Vector3, amount: int, color: Color = Color(0.93, 0.9, 0.8)) -> void:
+	if _chip_pool.is_empty():
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(0.03, 0.03, 0.03)
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.vertex_color_use_as_albedo = true
+		mesh.material = mat
+		for i in 4:
+			var cp := CPUParticles3D.new()
+			cp.emitting = false
+			cp.one_shot = true
+			cp.explosiveness = 1.0
+			cp.lifetime = 0.55
+			cp.mesh = mesh
+			cp.direction = Vector3(0, 1.0, 0.35)
+			cp.spread = 60.0
+			cp.initial_velocity_min = 1.5
+			cp.initial_velocity_max = 4.5
+			cp.gravity = Vector3(0, -9.0, 0)
+			cp.angular_velocity_min = -400.0
+			cp.angular_velocity_max = 400.0
+			cp.scale_amount_min = 0.5
+			cp.scale_amount_max = 1.5
+			add_child(cp)
+			_chip_pool.append(cp)
+	var e := _chip_pool[_chip_next]
+	_chip_next = (_chip_next + 1) % _chip_pool.size()
+	e.position = pos
+	e.amount = amount
+	e.color = color
+	e.restart()
+
+
+## Короткая «заморозка» на сильном ударе: придаёт ему вес. В автотестах отключена.
+func _hitstop(sec: float) -> void:
+	if sec <= 0.0 or autoplay or OS.get_cmdline_user_args().has("--devtest"):
+		return
+	if _hitstop_base < 0.0:
+		_hitstop_base = Engine.time_scale
+	Engine.time_scale = _hitstop_base * 0.05
+	await get_tree().create_timer(sec, true, false, true).timeout
+	if _hitstop_base >= 0.0:
+		Engine.time_scale = _hitstop_base
+		_hitstop_base = -1.0
 
 
 func _buzz(ms: int) -> void:
@@ -968,11 +1098,11 @@ func _build_room() -> void:
 	# Коридор из модулей 4×4: пол и стены по обе стороны, потолок — тёмная плита
 	for i in 4:
 		var z := 2.0 - i * 4.0
-		_model("floor_tile_large_rocks" if i == 2 else "floor_tile_large", Vector3(0, 0, z), 0.0)
+		_floor_nodes.append(_model("floor_tile_large_rocks" if i == 2 else "floor_tile_large", Vector3(0, 0, z), 0.0))
 		for side: float in [-1.0, 1.0]:
 			var wall: String = WALLS[rng.randi_range(0, WALLS.size() - 1)]
-			_model(wall, Vector3(side * 2.5, 0, z), -side * PI / 2.0)
-	_model("wall_gated", Vector3(0, 0, -10.5), 0.0)
+			_wall_nodes.append(_model(wall, Vector3(side * 2.5, 0, z), -side * PI / 2.0))
+	_wall_nodes.append(_model("wall_gated", Vector3(0, 0, -10.5), 0.0))
 	_static(_box(Vector3(6.0, 0.2, 18.0)), Vector3(0, 4.1, -4.0), stone_dark)
 
 	# Убранство: знамёна, бочки, ящики

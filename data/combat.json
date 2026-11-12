@@ -21,7 +21,9 @@
 		"parry_window": 0.25,
 		"parry_stagger": 45,
 		"early_parry_cost": 10,
-		"stun_mult": 2.0
+		"stun_mult": 2.0,
+		"crit_chance": 0.2,
+		"crit_mult": 1.8
 	},
 	"enemies": {
 		"ash_dead": {
