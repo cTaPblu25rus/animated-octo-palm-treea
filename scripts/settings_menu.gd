@@ -17,6 +17,7 @@ var _panel: PanelContainer
 var _style_buttons := {}
 var _volume: HSlider
 var _vibro: Button
+var _boons: Label
 
 
 func _ready() -> void:
@@ -125,6 +126,10 @@ func _build() -> void:
 	resume.add_theme_font_size_override("font_size", 22)
 	resume.pressed.connect(set_open.bind(false))
 	v.add_child(resume)
+	_boons = _label("", 15, GOLD, false)
+	_boons.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_boons.custom_minimum_size = Vector2(390, 0)
+	v.add_child(_boons)
 	var forge := _button("Кузница: улучшения и заточка", 60)
 	forge.pressed.connect(func() -> void: game.meta_ui.show_forge())
 	v.add_child(forge)
@@ -144,6 +149,10 @@ func _refresh() -> void:
 		for st in ["normal", "hover", "pressed", "focus"]:
 			b.add_theme_stylebox_override(st, _box(Color(0.25, 0.18, 0.1, 0.95) if on else Color(INK, 0.85), border, 3 if on else 1, 12))
 		b.add_theme_color_override("font_color", GOLD if on else PARCHMENT)
+	var names: PackedStringArray = []
+	for id: String in game.boons:
+		names.append(str(game.boons_cfg[id].name))
+	_boons.text = "Дары забега: " + (", ".join(names) if not names.is_empty() else "пока нет")
 	_vibro.text = "Вибрация: %s" % ("вкл" if Settings.vibration else "выкл")
 
 

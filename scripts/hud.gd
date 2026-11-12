@@ -15,9 +15,10 @@ const PARCHMENT := Color(0.96, 0.92, 0.82)
 const HP_RED := Color(0.86, 0.16, 0.14)
 const HP_GREEN := Color(0.36, 0.8, 0.32)
 const STAMINA := Color(0.3, 0.66, 1.0)
-const ROOM_HINTS := {"chest": "открыть сундук", "altar": "коснуться алтаря", "event": "осмотреть"}
+const ROOM_HINTS := {"shop": "войти в лавку", "chest": "открыть сундук", "altar": "коснуться алтаря", "event": "осмотреть"}
 const PIP_COLORS := {"fight": Color(0.86, 0.3, 0.24), "chest": Color(1.0, 0.8, 0.3),
-	"altar": Color(0.5, 0.82, 1.0), "event": Color(0.78, 0.62, 0.95), "boss": Color(0.75, 0.1, 0.2)}
+	"altar": Color(0.5, 0.82, 1.0), "event": Color(0.78, 0.62, 0.95), "boss": Color(0.75, 0.1, 0.2),
+	"elite": Color(0.85, 0.35, 0.95), "shop": Color(0.45, 0.9, 0.55)}
 
 var game: Node
 
@@ -336,7 +337,7 @@ func _on_draw() -> void:
 
 	if game.state == "title":
 		return
-	if not cinematic and game.state != "victory" and game.state != "loot":
+	if not cinematic and game.state != "victory" and game.state != "loot" and game.state != "choice":
 		_draw_path(w)
 		_draw_purse(w)
 		if enemy != null and enemy.state != Enemy.State.DEAD:
@@ -490,6 +491,12 @@ func _draw_player(w: float, h: float, enemy: Enemy) -> void:
 	_heart(hc + Vector2(0, 1), 10.0 + (1.2 * sin(_time * 8.0) if low else 0.0), HP_RED)
 
 	_fancy_bar(Rect2(px, hy + 30.0, pw * 0.5, 10), game.stamina / game.max_stamina, 0.0, STAMINA)
+	# Дары забега: ромбы цвета дара над полосой здоровья
+	for i in game.boons.size():
+		var bc := Color.html(str(game.boons_cfg[game.boons[i]].color))
+		var bp := Vector2(px + 10.0 + i * 20.0, hy - 13.0)
+		_diamond(bp, 8.0, INK)
+		_diamond(bp, 6.0, bc)
 	# Оружие в руке: название цветом редкости
 	var wpn: Dictionary = Save.data.weapon
 	_text_right(Items.title(game.items, wpn), Vector2(px + pw, hy + 41.0), 14, Items.color(game.items, wpn))
@@ -532,7 +539,13 @@ func _hint(enemy: Enemy) -> String:
 	if enemy == null or game.state != "fight" or enemy.state == Enemy.State.APPEAR:
 		return ""
 	if enemy.state == Enemy.State.WINDUP:
+		if enemy.ranged:
+			return "Снаряд %s! Отбей свайпом при вспышке" % game.SIDE_NAMES[enemy.attack_side]
+		if enemy.feinted:
+			return "Обман! Теперь удар %s" % game.SIDE_NAMES[enemy.attack_side]
 		return "Удар %s! Свайп навстречу при вспышке" % game.SIDE_NAMES[enemy.attack_side]
+	if enemy.guarded():
+		return "Щит поднят: удержи палец — заряженный удар"
 	if enemy.state == Enemy.State.STUNNED:
 		return "Удержи палец и отпусти — заряженный удар"
 	return "Свайп к жёлтой метке — точный удар"

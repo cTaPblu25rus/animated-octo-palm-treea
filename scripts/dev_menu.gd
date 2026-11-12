@@ -129,6 +129,7 @@ func _build() -> void:
 
 	_add("drop", _drop, "Выпадение оружия")
 	_add("legend", _drop_legend, "Легендарное оружие")
+	_add("boon", _boon, "Дар на выбор")
 	_add("forge", _forge, "Открыть кузницу")
 	_add("wipe", _wipe, "Сбросить сохранение")
 
@@ -281,6 +282,11 @@ func _drop() -> void:
 func _drop_legend() -> void:
 	_set_open(false)
 	game.offer_loot(Items.roll(game.items, RandomNumberGenerator.new(), 1.0, 3))
+
+
+func _boon() -> void:
+	_set_open(false)
+	game.offer_boons()
 
 
 func _forge() -> void:
