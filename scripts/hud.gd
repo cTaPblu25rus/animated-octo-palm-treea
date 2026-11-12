@@ -98,7 +98,16 @@ func _on_draw() -> void:
 	var cinematic: bool = game.state == "cutscene" or _boss_card > 0.01
 
 	# Виньетка и затемнения под интерфейс
-	_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false)
+	# Тонировка и виньетка зависят от стиля графики; на рассвете кат-сцены сходят на нет
+	var st: Dictionary = game.style
+	var calm: float = 1.0 - game.dawn
+	var tint: Color = st.tint
+	if tint.a > 0.0:
+		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(tint, tint.a * calm))
+	var vig := lerpf(0.62, float(st.vignette), calm)
+	_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false, Color(1, 1, 1, minf(1.0, vig / 0.62)))
+	if vig > 0.62:
+		_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false, Color(1, 1, 1, (vig - 0.62) / 0.62))
 	_canvas.draw_texture_rect(_shade_top, Rect2(0, 0, w, 150), false)
 	_canvas.draw_texture_rect(_shade_bottom, Rect2(0, h - 230, w, 230), false)
 
