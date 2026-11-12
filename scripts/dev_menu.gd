@@ -11,6 +11,7 @@
 extends CanvasLayer
 
 const Enemy := preload("res://scripts/enemy.gd")
+const Settings := preload("res://scripts/settings.gd")
 const SPEEDS := [1.0, 0.25, 0.5, 2.0, 4.0]
 const SOUNDS := ["swing", "hit", "crit", "parry", "block", "hurt", "windup", "stun", "dodge", "death", "victory"]
 const META := "dev_menu"
@@ -145,6 +146,7 @@ func _build() -> void:
 	_section("Отладка")
 	_add("speed", _cycle_speed)
 	_add("overlay", _toggle_flag.bind("overlay"))
+	_add("style", _cycle_style)
 	_add("sound", _test_sound)
 	_add("buzz", _test_buzz, "Тест вибрации")
 
@@ -195,6 +197,7 @@ func _refresh() -> void:
 	_label("overlay", "FPS и отладка", flag("overlay"))
 	_label("bot", "Автоигрок", _bot != null)
 	_buttons.speed.text = "Скорость игры: ×%s" % str(SPEEDS[_speed_i])
+	_buttons.style.text = "Графика: %s" % Settings.current().name
 	_buttons.sound.text = "Звук: %s" % SOUNDS[_sound_i]
 	_room_pick = clampi(_room_pick, 0, game.rooms.size() - 1)
 	var kind: String = game.rooms[_room_pick].kind
@@ -351,6 +354,13 @@ func _cycle_speed() -> void:
 	_speed_i = (_speed_i + 1) % SPEEDS.size()
 	flags().speed = SPEEDS[_speed_i]
 	Engine.time_scale = SPEEDS[_speed_i]
+
+
+func _cycle_style() -> void:
+	var i := Settings.STYLE_ORDER.find(Settings.style)
+	Settings.style = Settings.STYLE_ORDER[(i + 1) % Settings.STYLE_ORDER.size()]
+	Settings.save()
+	game.apply_style()
 
 
 func _test_sound() -> void:

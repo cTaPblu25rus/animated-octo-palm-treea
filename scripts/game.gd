@@ -10,6 +10,8 @@ const Hud := preload("res://scripts/hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Run := preload("res://scripts/run.gd")
 const DevMenu := preload("res://scripts/dev_menu.gd")
+const Settings := preload("res://scripts/settings.gd")
+const SettingsMenu := preload("res://scripts/settings_menu.gd")
 
 const DUNGEON := "res://assets/kaykit/dungeon/"
 const HERO_SWORD := preload("res://assets/kaykit/hero/sword_1handed.gltf")
@@ -66,6 +68,7 @@ var gold := 0
 var damage_mult := 1.0
 var visited := {}
 var cut_t := 0.0                # время кат-сцены после босса, читает HUD
+var dawn := 0.0                 # сила рассвета 0..1
 var white := 0.0                # белая вспышка рассвета в кат-сцене
 var _env: Environment
 var _moon: DirectionalLight3D
@@ -85,6 +88,9 @@ var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
 
 var gestures: Node
 var dev_menu: CanvasLayer
+var settings_menu: CanvasLayer
+var style: Dictionary = {}      # параметры текущего стиля графики, читает HUD
+var _lantern: OmniLight3D
 var hud: CanvasLayer
 var sfx: Node
 var camera: Camera3D
@@ -125,6 +131,12 @@ func _ready() -> void:
 	rooms = Run.generate(run_cfg, run_seed)
 	_run_rng.seed = run_seed
 
+	Settings.load_once()
+	Settings.apply_volume()
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--style=") and Settings.STYLES.has(a.trim_prefix("--style=")):
+			Settings.style = a.trim_prefix("--style=")
+	style = Settings.current()
 	sfx = Sfx.new()
 	add_child(sfx)
 	_build_room()
@@ -135,6 +147,10 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
+	settings_menu = SettingsMenu.new()
+	settings_menu.game = self
+	add_child(settings_menu)
+	apply_style()
 	# Меню разработчика — только в debug-сборке
 	if OS.is_debug_build():
 		dev_menu = DevMenu.new()
@@ -404,13 +420,31 @@ func _run_cutscene(delta: float) -> void:
 
 ## Сила рассвета 0..1: свет за решёткой, тёплый туман, яркость окружения.
 func _set_dawn(k: float) -> void:
+	dawn = k
 	_dawn.light_energy = 6.0 * k
 	_dawn_glow.albedo_color = Color(0.02, 0.02, 0.03).lerp(Color(1.0, 0.86, 0.55), k)
-	_env.fog_light_color = Color(0.08, 0.1, 0.16).lerp(Color(0.95, 0.7, 0.4), k)
-	_env.fog_density = lerpf(0.075, 0.035, k)
-	_env.ambient_light_color = Color(0.25, 0.3, 0.42).lerp(Color(1.0, 0.85, 0.65), k)
-	_env.ambient_light_energy = lerpf(0.45, 1.0, k)
-	_moon.light_energy = lerpf(0.35, 0.0, k)
+	var fog: Color = style.fog
+	var ambient: Color = style.ambient
+	_env.fog_light_color = fog.lerp(Color(0.95, 0.7, 0.4), k)
+	_env.fog_density = lerpf(float(style.fog_density), 0.035, k)
+	_env.ambient_light_color = ambient.lerp(Color(1.0, 0.85, 0.65), k)
+	_env.ambient_light_energy = lerpf(float(style.ambient_energy), 1.0, k)
+	_moon.light_energy = lerpf(float(style.moon), 0.0, k)
+	# Заря возвращает миру цвет в любом стиле
+	_env.adjustment_saturation = lerpf(float(style.saturation), 1.0, k)
+	_env.adjustment_contrast = lerpf(float(style.contrast), 1.0, k)
+	_env.adjustment_brightness = lerpf(float(style.brightness), 1.0, k)
+
+
+## Применить стиль графики из настроек: свет, туман, цветокоррекция. Можно звать на лету.
+func apply_style() -> void:
+	style = Settings.current()
+	_env.adjustment_enabled = true
+	_lantern.light_color = style.lantern
+	_lantern.light_energy = float(style.lantern_energy)
+	for t in _torches:
+		t.light_color = style.torch
+	_set_dawn(dawn)
 
 
 # ============================================================ для меню разработчика
@@ -660,7 +694,7 @@ func _dodge(dir: int) -> void:
 
 
 func _buzz(ms: int) -> void:
-	if OS.has_feature("mobile"):
+	if OS.has_feature("mobile") and Settings.vibration:
 		Input.vibrate_handheld(ms)
 
 
@@ -690,6 +724,7 @@ func _build_camera() -> void:
 	lantern.omni_attenuation = 1.2
 	lantern.shadow_enabled = false
 	camera.add_child(lantern)
+	_lantern = lantern
 
 	_sword = Node3D.new()
 	_sword.position = SWORD_POS
@@ -780,7 +815,9 @@ func _animate_view(delta: float) -> void:
 
 	# Мерцание факелов
 	for i in _torches.size():
-		_torches[i].light_energy = 1.6 + 0.25 * sin(_time * 9.0 + i * 2.1) + 0.15 * sin(_time * 23.0 + i)
+		var fl := float(style.flicker)
+		_torches[i].light_energy = float(style.torch_energy) * maxf(0.15,
+			1.0 + fl * (0.15 * sin(_time * 9.0 + i * 2.1) + 0.1 * sin(_time * 23.0 + i)))
 
 
 # ============================================================ комната
