@@ -108,7 +108,7 @@ var _sword_model: Node3D
 var _last_struck_side := 0
 var _chip_pool: Array[CPUParticles3D] = []
 var _chip_next := 0
-var _hitstop_base := -1.0
+var _hitstop_until := 0          # момент (мс), до которого враг «заморожен»
 var _loot_then := ""            # что делать после выбора добычи: cleared | cutscene
 var style: Dictionary = {}      # параметры текущего стиля графики, читает HUD
 var _lantern: OmniLight3D
@@ -158,6 +158,8 @@ func _ready() -> void:
 	rooms = Run.generate(run_cfg, run_seed)
 	_run_rng.seed = run_seed
 
+	if not autoplay:
+		Engine.time_scale = 1.0     # страховка: скорость не должна «застрять» между сценами
 	Settings.load_once()
 	Settings.apply_volume()
 	for a in OS.get_cmdline_user_args():
@@ -240,6 +242,7 @@ func _load_json(path: String) -> Dictionary:
 
 func _process(delta: float) -> void:
 	_time += delta
+	_update_hitstop()
 	attack_cd = maxf(0.0, attack_cd - delta)
 	block_t = maxf(0.0, block_t - delta)
 	dodge_t = maxf(0.0, dodge_t - delta)
@@ -499,6 +502,7 @@ func _room_cleared() -> void:
 func _begin_cutscene() -> void:
 	state = "cutscene"
 	cut_t = 0.0
+	_shake = 0.0
 	cut_total = maxf(CUT_TIME, voice.say_sequence(["cut_1", "cut_2", "cut_3"], 0.5, 0.8) + 2.6)
 
 
@@ -832,7 +836,7 @@ func _animate_prop(delta: float) -> void:
 
 func on_gesture(kind: String) -> void:
 	if state == "victory" or state == "defeat":
-		if kind == "tap":
+		if kind == "tap" and hud.result_ready():
 			get_tree().reload_current_scene()
 		return
 	if state == "room":
@@ -1009,17 +1013,23 @@ func _chips(pos: Vector3, amount: int, color: Color = Color(0.93, 0.9, 0.8)) -> 
 	e.restart()
 
 
-## Короткая «заморозка» на сильном ударе: придаёт ему вес. В автотестах отключена.
+## Короткая «заморозка» врага на сильном ударе: придаёт удару вес.
+## Замирает только враг (его логика и анимация), по настоящим часам. Общую скорость
+## игры не трогаем: застрявший Engine.time_scale замедлил бы всё, включая экран итога.
 func _hitstop(sec: float) -> void:
 	if sec <= 0.0 or autoplay or OS.get_cmdline_user_args().has("--devtest"):
 		return
-	if _hitstop_base < 0.0:
-		_hitstop_base = Engine.time_scale
-	Engine.time_scale = _hitstop_base * 0.05
-	await get_tree().create_timer(sec, true, false, true).timeout
-	if _hitstop_base >= 0.0:
-		Engine.time_scale = _hitstop_base
-		_hitstop_base = -1.0
+	if enemy == null or not enemy.is_alive():
+		return
+	_hitstop_until = maxi(_hitstop_until, Time.get_ticks_msec() + int(sec * 1000.0))
+	enemy.process_mode = Node.PROCESS_MODE_DISABLED
+
+
+func _update_hitstop() -> void:
+	if _hitstop_until > 0 and Time.get_ticks_msec() >= _hitstop_until:
+		_hitstop_until = 0
+		if enemy != null:
+			enemy.process_mode = Node.PROCESS_MODE_INHERIT
 
 
 func _buzz(ms: int) -> void:

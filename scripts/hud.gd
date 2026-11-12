@@ -36,6 +36,7 @@ var _shade_top: GradientTexture2D
 var _enemy_trail := 1.0       # «след» урона на полосе врага
 var _hp_trail := 1.0          # и на полосе героя
 var _result_t := 0.0
+var _last_ms := 0
 var _boss_card := 0.0
 var _fx: Array[Dictionary] = []   # эффекты ударов: вспышки, следы клинка, кольца, когти
 var _flash := 0.0                 # белая вспышка экрана на крит
@@ -61,6 +62,11 @@ func say(text: String, color: Color, dur: float) -> void:
 	_msg_color = color
 	_msg_t = dur
 	_msg_dur = dur
+
+
+## Экран итога дорисован, можно принимать тап «новый забег».
+func result_ready() -> bool:
+	return _result_t > 1.6
 
 
 func hurt_flash() -> void:
@@ -293,7 +299,11 @@ func _process(delta: float) -> void:
 	var hp_k: float = game.hp / game.max_hp
 	_hp_trail = hp_k if hp_k > _hp_trail else move_toward(_hp_trail, hp_k, delta * 0.35)
 	var ended: bool = game.state == "victory" or game.state == "defeat"
-	_result_t = _result_t + delta if ended else 0.0
+	# Экран итога идёт по настоящим часам: не зависит от скорости игры
+	var now := Time.get_ticks_msec()
+	var real_delta := clampf((now - _last_ms) / 1000.0, 0.0, 0.1)
+	_last_ms = now
+	_result_t = _result_t + real_delta if ended else 0.0
 	var boss_intro := enemy != null and enemy.is_boss and enemy.state == Enemy.State.APPEAR
 	_boss_card = move_toward(_boss_card, 1.0 if boss_intro else 0.0, delta * 2.5)
 	_canvas.queue_redraw()
