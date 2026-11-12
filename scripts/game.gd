@@ -10,6 +10,11 @@ const Hud := preload("res://scripts/hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Run := preload("res://scripts/run.gd")
 
+const DUNGEON := "res://assets/kaykit/dungeon/"
+const HERO_SWORD := preload("res://assets/kaykit/hero/sword_1handed.gltf")
+const HERO_SHIELD := preload("res://assets/kaykit/hero/shield_round.gltf")
+const WALLS := ["wall", "wall_cracked", "wall", "wall_arched", "wall_broken", "wall_shelves"]
+
 const DATA_PATH := "res://data/combat.json"
 const RUN_PATH := "res://data/run.json"
 const WALK_TIME := 1.5
@@ -87,7 +92,7 @@ var _time := 0.0
 var _rng := RandomNumberGenerator.new()
 
 const SWORD_REST := Vector3(-0.25, 0.0, -0.35)
-const SWORD_POS := Vector3(0.3, -0.42, -0.62)
+const SWORD_POS := Vector3(0.3, -0.38, -0.62)
 const SHIELD_REST := Vector3(-0.42, -0.6, -0.72)
 const SHIELD_UP := Vector3(-0.06, -0.2, -0.45)
 
@@ -358,30 +363,20 @@ func _walk_bob() -> float:
 
 func _make_chest() -> void:
 	_prop = Node3D.new()
-	_prop.position = ENEMY_POS + Vector3(0, 0, 0.3)
+	_prop.position = ENEMY_POS + Vector3(0, 0, 0.2)
 	add_child(_prop)
-	var wood := _mat(Color(0.38, 0.24, 0.13), 0.85)
-	var iron := _mat(Color(0.75, 0.6, 0.3), 0.5)
-	_part(_prop, _box(Vector3(0.9, 0.5, 0.55)), Vector3(0, 0.25, 0), wood)
-	_part(_prop, _box(Vector3(0.94, 0.06, 0.59)), Vector3(0, 0.12, 0), iron)
-	_part(_prop, _box(Vector3(0.12, 0.16, 0.04)), Vector3(0, 0.42, 0.29), iron)
-	_prop_lid = Node3D.new()
-	_prop_lid.position = Vector3(0, 0.5, -0.275)
-	_prop.add_child(_prop_lid)
-	_part(_prop_lid, _box(Vector3(0.94, 0.18, 0.59)), Vector3(0, 0.09, 0.275), wood)
-	_part(_prop_lid, _box(Vector3(0.96, 0.05, 0.61)), Vector3(0, 0.18, 0.275), iron)
-	_prop_glow = _part(_prop, _box(Vector3(0.8, 0.04, 0.45)), Vector3(0, 0.49, 0), _glow_mat(Color(1.0, 0.8, 0.3)))
+	var chest := _model("chest_gold", Vector3.ZERO, 0.0, 0.62, _prop)
+	_prop_lid = chest.find_child("chest*lid*", true, false)
+	_prop_glow = _part(_prop, _box(Vector3(0.8, 0.04, 0.5)), Vector3(0, 0.36, 0), _glow_mat(Color(1.0, 0.8, 0.3)))
 	_prop_glow.visible = false
+	_model("coin_stack_large", Vector3(0.75, 0, 0.25), 0.5, 0.6, _prop)
 
 
 func _make_altar() -> void:
 	_prop = Node3D.new()
 	_prop.position = ENEMY_POS
 	add_child(_prop)
-	var stone := _mat(Color(0.42, 0.42, 0.46), 0.9)
-	_part(_prop, _box(Vector3(1.0, 0.2, 1.0)), Vector3(0, 0.1, 0), stone)
-	_part(_prop, _box(Vector3(0.5, 0.9, 0.5)), Vector3(0, 0.65, 0), stone)
-	_part(_prop, _box(Vector3(0.75, 0.12, 0.75)), Vector3(0, 1.16, 0), stone)
+	_model("column", Vector3.ZERO, 0.0, 0.85, _prop)
 	var orb := SphereMesh.new()
 	orb.radius = 0.16
 	orb.height = 0.32
@@ -393,10 +388,9 @@ func _make_wisp() -> void:
 	_prop = Node3D.new()
 	_prop.position = ENEMY_POS
 	add_child(_prop)
-	var cloth := _mat(Color(0.3, 0.27, 0.25), 0.95)
-	# Свёрток у стены и огонёк над ним
-	_part(_prop, _box(Vector3(0.8, 0.22, 0.4)), Vector3(0, 0.11, 0), cloth)
-	_part(_prop, _box(Vector3(0.3, 0.3, 0.3)), Vector3(-0.3, 0.3, 0), cloth)
+	# Сломанные меч и щит павшего стража и огонёк над ними
+	var relic := _model("sword_shield_broken", Vector3(0, 0.5, 0), 0.0, 0.6, _prop)
+	relic.rotation.x = -0.5
 	var orb := SphereMesh.new()
 	orb.radius = 0.09
 	orb.height = 0.18
@@ -427,7 +421,7 @@ func _animate_prop(delta: float) -> void:
 	match str(room.kind):
 		"chest":
 			if _prop_used:
-				_prop_lid.rotation.x = lerpf(_prop_lid.rotation.x, -1.9, 1.0 - exp(-9.0 * delta))
+				_prop_lid.rotation.x = lerpf(_prop_lid.rotation.x, -1.5, 1.0 - exp(-9.0 * delta))
 				_prop_glow.visible = true
 		"altar", "event":
 			var base_y := 1.5 if str(room.kind) == "altar" else 1.1
@@ -581,47 +575,28 @@ func _build_camera() -> void:
 	var lantern := OmniLight3D.new()
 	lantern.position = Vector3(-0.35, -0.3, -0.2)
 	lantern.light_color = Color(1.0, 0.82, 0.55)
-	lantern.light_energy = 1.3
+	lantern.light_energy = 0.7
 	lantern.omni_range = 6.0
 	lantern.omni_attenuation = 1.2
 	lantern.shadow_enabled = false
 	camera.add_child(lantern)
 
-	var steel := StandardMaterial3D.new()
-	steel.albedo_color = Color(0.8, 0.82, 0.86)
-	steel.metallic = 0.25
-	steel.roughness = 0.3
-	var leather := StandardMaterial3D.new()
-	leather.albedo_color = Color(0.3, 0.2, 0.13)
-	leather.roughness = 0.9
-	var gold := StandardMaterial3D.new()
-	gold.albedo_color = Color(0.85, 0.62, 0.25)
-	gold.metallic = 0.7
-	gold.roughness = 0.4
-
 	_sword = Node3D.new()
 	_sword.position = SWORD_POS
 	_sword.rotation = SWORD_REST
 	camera.add_child(_sword)
-	_part(_sword, _box(Vector3(0.05, 0.62, 0.015)), Vector3(0, 0.38, 0), steel)
-	_part(_sword, _box(Vector3(0.2, 0.035, 0.04)), Vector3(0, 0.06, 0), gold)
-	_part(_sword, _box(Vector3(0.035, 0.14, 0.035)), Vector3(0, -0.03, 0), leather)
+	var sword_model: Node3D = HERO_SWORD.instantiate()
+	sword_model.scale = Vector3.ONE * 0.36
+	_sword.add_child(sword_model)
 
 	_shield = Node3D.new()
 	_shield.position = SHIELD_REST
 	_shield.rotation = Vector3(0.0, 0.35, 0.1)
 	camera.add_child(_shield)
-	var disc := CylinderMesh.new()
-	disc.top_radius = 0.19
-	disc.bottom_radius = 0.19
-	disc.height = 0.04
-	disc.radial_segments = 20
-	var shield_mesh := _part(_shield, disc, Vector3.ZERO, leather)
-	shield_mesh.rotation = Vector3(PI / 2.0, 0.0, 0.0)
-	var boss := SphereMesh.new()
-	boss.radius = 0.06
-	boss.height = 0.06
-	_part(_shield, boss, Vector3(0, 0, 0.03), gold)
+	var shield_model: Node3D = HERO_SHIELD.instantiate()
+	shield_model.scale = Vector3.ONE * 0.42
+	shield_model.rotation = Vector3(0.0, PI, 0.0)    # лицевой стороной от игрока
+	_shield.add_child(shield_model)
 
 
 func _part(parent: Node3D, mesh: Mesh, pos: Vector3, mat: Material) -> MeshInstance3D:
@@ -704,55 +679,52 @@ func _build_room() -> void:
 	e.background_color = Color(0.02, 0.025, 0.04)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.25, 0.3, 0.42)
-	e.ambient_light_energy = 0.55
+	e.ambient_light_energy = 0.45
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.08, 0.1, 0.16)
-	e.fog_density = 0.06
+	e.fog_density = 0.075
 	env.environment = e
 	add_child(env)
 
-	var stone := _mat(Color(0.26, 0.25, 0.27), 0.95)
-	var stone_dark := _mat(Color(0.16, 0.15, 0.17), 0.95)
-	var wood := _mat(Color(0.25, 0.16, 0.1), 0.9)
+	var stone_dark := _mat(Color(0.1, 0.095, 0.11), 0.95)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
 
-	# Пол, потолок, стены коридора
-	_static(_box(Vector3(6.0, 0.2, 14.0)), Vector3(0, -0.1, -4.0), stone)
-	_static(_box(Vector3(6.0, 0.2, 14.0)), Vector3(0, 4.2, -4.0), stone_dark)
-	_static(_box(Vector3(0.4, 4.4, 14.0)), Vector3(-2.6, 2.0, -4.0), stone_dark)
-	_static(_box(Vector3(0.4, 4.4, 14.0)), Vector3(2.6, 2.0, -4.0), stone_dark)
-	_static(_box(Vector3(6.0, 4.4, 0.4)), Vector3(0, 2.0, -10.0), stone_dark)
+	# Коридор из модулей 4×4: пол и стены по обе стороны, потолок — тёмная плита
+	for i in 4:
+		var z := 2.0 - i * 4.0
+		_model("floor_tile_large_rocks" if i == 2 else "floor_tile_large", Vector3(0, 0, z), 0.0)
+		for side: float in [-1.0, 1.0]:
+			var wall: String = WALLS[rng.randi_range(0, WALLS.size() - 1)]
+			_model(wall, Vector3(side * 2.5, 0, z), -side * PI / 2.0)
+	_model("wall_gated", Vector3(0, 0, -10.5), 0.0)
+	_static(_box(Vector3(6.0, 0.2, 18.0)), Vector3(0, 4.1, -4.0), stone_dark)
 
-	# Плиты пола: тёмные швы для ощущения глубины
-	for z in range(0, 7):
-		_static(_box(Vector3(5.0, 0.02, 0.06)), Vector3(0, 0.005, -0.5 - z * 1.4), stone_dark)
+	# Убранство: знамёна, бочки, ящики
+	_model("banner_patternA_red", Vector3(-2.5, 0, -4.2), PI / 2.0)
+	_model("banner_shield_red", Vector3(2.5, 0, -4.2), -PI / 2.0)
+	_model("barrel_large", Vector3(-1.5, 0, -5.6), 0.4, 0.5)
+	_model("barrel_small_stack", Vector3(1.45, 0, -6.4), -0.6, 0.6)
+	_model("box_stacked", Vector3(1.5, 0, -8.2), 0.3, 0.45)
+	_model("rubble_half", Vector3(-1.4, 0, -8.6), 0.9, 0.5)
 
-	# Колонны и арки
-	for z in [-1.2, -4.0, -6.8]:
-		for x in [-2.05, 2.05]:
-			_static(_box(Vector3(0.55, 4.2, 0.55)), Vector3(x, 2.0, z), stone)
-		_static(_box(Vector3(4.6, 0.45, 0.55)), Vector3(0, 3.85, z), stone)
-
-	# Дальняя решётка
-	for x in range(-4, 5):
-		_static(_box(Vector3(0.06, 3.2, 0.06)), Vector3(x * 0.42, 1.6, -9.6), wood)
-
-	# Факелы: свет без теней, тёплые акценты
-	for t in [Vector3(-2.3, 2.2, -2.6), Vector3(2.3, 2.2, -2.6), Vector3(-2.3, 2.2, -5.5), Vector3(2.3, 2.2, -5.5)]:
+	# Факелы на стенах: модель + тёплый свет без теней
+	for t in [Vector3(-2.0, 2.0, -2.6), Vector3(2.0, 2.0, -2.6), Vector3(-2.0, 2.0, -6.6), Vector3(2.0, 2.0, -6.6)]:
 		var pos: Vector3 = t
-		_static(_box(Vector3(0.08, 0.35, 0.08)), pos + Vector3(0, -0.2, 0), wood)
+		_model("torch_mounted", pos, PI / 2.0 if pos.x < 0.0 else -PI / 2.0, 0.8)
 		var flame_mat := StandardMaterial3D.new()
 		flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		flame_mat.albedo_color = Color(1.0, 0.6, 0.2)
+		flame_mat.albedo_color = Color(1.0, 0.65, 0.25)
 		var flame := SphereMesh.new()
-		flame.radius = 0.07
-		flame.height = 0.18
-		_static(flame, pos + Vector3(0, 0.05, 0), flame_mat)
+		flame.radius = 0.08
+		flame.height = 0.22
+		_static(flame, pos + Vector3(-signf(pos.x) * 0.36, 0.62, 0), flame_mat)
 		var light := OmniLight3D.new()
-		light.position = pos + Vector3(signf(-pos.x) * 0.25, 0.1, 0)
+		light.position = pos + Vector3(-signf(pos.x) * 0.5, 0.6, 0)
 		light.light_color = Color(1.0, 0.62, 0.3)
-		light.omni_range = 4.5
-		light.omni_attenuation = 1.4
+		light.omni_range = 5.5
+		light.omni_attenuation = 1.3
 		light.shadow_enabled = false
 		add_child(light)
 		_torches.append(light)
@@ -764,6 +736,17 @@ func _build_room() -> void:
 	moon.light_energy = 0.35
 	moon.shadow_enabled = false
 	add_child(moon)
+
+
+## Поставить модель из набора подземелья. Возвращает узел, чтобы его можно было анимировать.
+func _model(model_name: String, pos: Vector3, rot_y: float, sc: float = 1.0, parent: Node3D = null) -> Node3D:
+	var scene: PackedScene = load(DUNGEON + model_name + ".glb")
+	var node: Node3D = scene.instantiate()
+	node.position = pos
+	node.rotation.y = rot_y
+	node.scale = Vector3.ONE * sc
+	(parent if parent != null else self).add_child(node)
+	return node
 
 
 func _static(mesh: Mesh, pos: Vector3, mat: Material) -> void:
