@@ -37,6 +37,11 @@ var _enemy_trail := 1.0       # «след» урона на полосе вра
 var _hp_trail := 1.0          # и на полосе героя
 var _result_t := 0.0
 var _boss_card := 0.0
+var _fx: Array[Dictionary] = []   # эффекты ударов: вспышки, следы клинка, кольца, когти
+var _flash := 0.0                 # белая вспышка экрана на крит
+var combo := 0                    # серия точных ударов подряд
+var _combo_t := 0.0
+var _combo_pop := 0.0
 
 
 func _ready() -> void:
@@ -63,16 +68,218 @@ func hurt_flash() -> void:
 
 
 ## Всплывающая цифра урона над точкой мира.
-func popup(text: String, world_pos: Vector3, color: Color, big: bool) -> void:
+func popup(text: String, world_pos: Vector3, color: Color, big: bool, crit: bool = false) -> void:
 	var cam: Camera3D = game.camera
 	if cam == null or cam.is_position_behind(world_pos):
 		return
 	var pos := cam.unproject_position(world_pos) + Vector2(randf_range(-36, 36), randf_range(-10, 10))
-	_popups.append({"text": text, "pos": pos, "t": 0.0, "color": color, "big": big})
+	_popups.append({"text": text, "pos": pos, "t": 0.0, "color": color, "big": big, "crit": crit})
+
+
+# ============================================================ эффекты ударов
+
+func _screen(world_pos: Vector3) -> Vector2:
+	var cam: Camera3D = game.camera
+	if cam == null or cam.is_position_behind(world_pos):
+		return _canvas.size * 0.5
+	return cam.unproject_position(world_pos)
+
+
+## Попадание по врагу: след клинка, вспышка-звезда; на крит — надпись, лучи и вспышка экрана.
+func fx_hit(world_pos: Vector3, side: int, weak: bool, crit: bool, charged: bool, color: Color) -> void:
+	var pos := _screen(world_pos)
+	_fx.append({"type": "slash", "pos": pos, "side": side, "t": 0.0, "dur": 0.26,
+		"color": color, "size": 150.0 if charged or crit else 110.0})
+	var burst_color := Color(0.9, 0.9, 0.9)
+	var size := 34.0
+	if weak:
+		burst_color = Color(1.0, 0.85, 0.3)
+		size = 54.0
+	if crit:
+		burst_color = Color(1.0, 0.4, 0.15)
+		size = 92.0
+	if charged:
+		size *= 1.3
+	_fx.append({"type": "burst", "pos": pos, "t": 0.0, "dur": 0.3, "color": burst_color,
+		"size": size, "rot": randf() * TAU})
+	if crit:
+		_fx.append({"type": "crit", "pos": pos + Vector2(0, -175), "t": 0.0, "dur": 0.8, "rot": randf_range(-0.18, 0.18)})
+		_flash = 0.3
+	if weak:
+		combo += 1
+		_combo_t = 3.0
+		_combo_pop = 1.0
+	else:
+		combo = 0
+
+
+## Парирование: расходящееся кольцо и искры.
+func fx_parry(world_pos: Vector3) -> void:
+	_fx.append({"type": "ring", "pos": _screen(world_pos), "t": 0.0, "dur": 0.4, "rot": randf() * TAU})
+	_flash = 0.15
+
+
+## Герой получил урон: следы когтей со стороны удара, серия обрывается.
+func fx_hurt(side: int) -> void:
+	_fx.append({"type": "claw", "side": side, "t": 0.0, "dur": 0.55})
+	combo = 0
+
+
+func _draw_fx(w: float, h: float) -> void:
+	for f in _fx:
+		var k: float = f.t / f.dur
+		match str(f.type):
+			"slash":
+				_draw_slash(f.pos, int(f.side), k, f.color, float(f.size))
+			"burst":
+				var c: Color = f.color
+				var grow := 0.35 + 0.65 * (1.0 - pow(1.0 - k, 3.0))
+				_spikes(f.pos, float(f.size) * grow, float(f.rot), 10, Color(c, (1.0 - k) * 0.9))
+				_spikes(f.pos, float(f.size) * grow * 0.55, float(f.rot) + 0.3, 8, Color(1, 1, 1, (1.0 - k)))
+			"crit":
+				_draw_crit(f.pos, k, float(f.rot), w, h)
+			"ring":
+				var r := 30.0 + 150.0 * (1.0 - pow(1.0 - k, 2.0))
+				_canvas.draw_arc(f.pos, r, 0.0, TAU, 40, Color(1.0, 0.95, 0.7, 1.0 - k), 7.0 * (1.0 - k) + 1.0)
+				_canvas.draw_arc(f.pos, r * 0.6, 0.0, TAU, 32, Color(1, 1, 1, (1.0 - k) * 0.6), 3.0)
+				for i in 10:
+					var ang := float(f.rot) + i * TAU / 10.0
+					var dir := Vector2(cos(ang), sin(ang))
+					_canvas.draw_line(f.pos + dir * r * 0.7, f.pos + dir * (r * 0.7 + 34.0 * (1.0 - k)),
+						Color(1.0, 0.9, 0.5, 1.0 - k), 3.0)
+			"claw":
+				_draw_claw(int(f.side), k, w, h)
+	if _flash > 0.0:
+		_canvas.draw_rect(Rect2(0, 0, w, h), Color(1, 1, 1, _flash * 0.5))
+
+
+## След клинка: серп, который проносится через точку удара в сторону свайпа.
+func _draw_slash(pos: Vector2, side: int, k: float, color: Color, size: float) -> void:
+	var d := Vector2(0, 1)                     # удар сверху вниз
+	var n := Vector2(1, 0)
+	if side == Enemy.Side.LEFT:
+		d = Vector2(-1, 0)                     # справа налево
+		n = Vector2(0, -1)
+	elif side == Enemy.Side.RIGHT:
+		d = Vector2(1, 0)                      # слева направо
+		n = Vector2(0, -1)
+	# Голова следа убегает вперёд, хвост догоняет: серп проносится и тает
+	var head := -1.0 + 2.0 * minf(1.0, k * 2.2)
+	var tail := -1.0 + 2.0 * clampf(k * 2.2 - 0.7, 0.0, 1.0)
+	if head - tail < 0.05:
+		return
+	var steps := 12
+	var outer := PackedVector2Array()
+	var inner := PackedVector2Array()
+	for i in steps + 1:
+		var u := lerpf(tail, head, float(i) / steps)
+		var mid := pos + d * u * size + n * (1.0 - u * u) * size * 0.3
+		var thick := size * 0.16 * (1.0 - u * u) * sin(float(i) / steps * PI)
+		outer.append(mid + n * thick)
+		inner.append(mid - n * thick * 0.35)
+	inner.reverse()
+	outer.append_array(inner)
+	var a := 1.0 - smoothstep(0.55, 1.0, k)
+	_canvas.draw_colored_polygon(outer, Color(color.lerp(Color.WHITE, 0.65), a * 0.92))
+
+
+func _draw_crit(pos: Vector2, k: float, rot: float, w: float, h: float) -> void:
+	var a := 1.0 - smoothstep(0.6, 1.0, k)
+	# Лучи скорости от точки удара к краям экрана
+	var rays := 14
+	for i in rays:
+		var ang := i * TAU / rays + rot * 3.0
+		var dir := Vector2(cos(ang), sin(ang))
+		var near := 120.0 + 260.0 * k
+		var far := maxf(w, h)
+		var side := dir.orthogonal() * 9.0
+		_canvas.draw_colored_polygon(PackedVector2Array([
+			pos + dir * near, pos + dir * far + side, pos + dir * far - side]),
+			Color(1.0, 0.8, 0.4, a * 0.22 * (1.0 - k)))
+	var pop := 1.0 + 0.9 * (1.0 - smoothstep(0.0, 0.16, k))
+	_canvas.draw_set_transform(pos + Vector2(0, -50.0 * k), rot, Vector2.ONE * pop)
+	_spikes(Vector2.ZERO, 74.0, 0.2, 12, Color(0.55, 0.05, 0.02, a * 0.9))
+	_spikes(Vector2.ZERO, 62.0, 0.2, 12, Color(1.0, 0.35, 0.1, a))
+	_text("КРИТ!", Vector2(0, 14), 40, Color(1.0, 0.97, 0.75, a))
+	_canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Три рваных следа когтей поперёк экрана со стороны удара.
+func _draw_claw(side: int, k: float, w: float, h: float) -> void:
+	var a := 1.0 - smoothstep(0.3, 1.0, k)
+	var reveal := minf(1.0, k * 5.0)
+	var from := Vector2(w * 0.1, h * 0.25)
+	var to := Vector2(w * 0.9, h * 0.62)
+	if side == Enemy.Side.RIGHT:
+		from = Vector2(w * 0.9, h * 0.25)
+		to = Vector2(w * 0.1, h * 0.62)
+	elif side == Enemy.Side.TOP:
+		from = Vector2(w * 0.5, h * 0.12)
+		to = Vector2(w * 0.5, h * 0.7)
+	var dir := (to - from)
+	var n := dir.normalized().orthogonal()
+	for i in 3:
+		var off := n * (i - 1) * 46.0
+		var p0 := from + off
+		var p1 := from + off + dir * reveal
+		var mid := (p0 + p1) * 0.5
+		_canvas.draw_colored_polygon(PackedVector2Array([p0, mid + n * 11.0, p1, mid - n * 11.0]),
+			Color(0.75, 0.03, 0.03, a * 0.85))
+		_canvas.draw_colored_polygon(PackedVector2Array([p0, mid + n * 4.0, p1, mid - n * 4.0]),
+			Color(1.0, 0.45, 0.35, a))
+
+
+## Звёздочки, кружащие над оглушённым врагом.
+func _draw_stun_stars(enemy: Enemy) -> void:
+	var pos := _screen(enemy.global_position + Vector3(0, 2.25 * enemy.scale.y * 0.62, 0))
+	for i in 3:
+		var ang := _time * 4.0 + i * TAU / 3.0
+		var sp := pos + Vector2(cos(ang) * 46.0, sin(ang) * 13.0)
+		var front := sin(ang) > 0.0
+		_star(sp, 13.0 if front else 9.0, Color(1.0, 0.9, 0.35, 1.0 if front else 0.55))
+
+
+## Счётчик серии точных ударов справа.
+func _draw_combo(w: float, h: float) -> void:
+	if combo < 2:
+		return
+	var a := clampf(_combo_t, 0.0, 1.0)
+	var pop := 1.0 + 0.6 * _combo_pop
+	var pos := Vector2(w - 62, h * 0.3)
+	_canvas.draw_set_transform(pos, -0.12, Vector2.ONE * pop)
+	_text("×%d" % combo, Vector2(0, 0), 40, Color(GOLD.lerp(Color(1.0, 0.4, 0.2), clampf((combo - 2) / 8.0, 0.0, 1.0)), a))
+	_canvas.draw_set_transform(pos, -0.12, Vector2.ONE)
+	_text("серия", Vector2(0, 22), 15, Color(PARCHMENT, a * 0.9))
+	_canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Звезда-вспышка с острыми лучами (треугольники вокруг центра).
+func _spikes(c: Vector2, r: float, rot: float, n: int, col: Color) -> void:
+	if col.a <= 0.0:
+		return
+	var inner := PackedVector2Array()
+	for i in n:
+		var a0 := rot + i * TAU / n
+		var half := PI / n
+		var left := c + Vector2(cos(a0 - half), sin(a0 - half)) * r * 0.42
+		var right := c + Vector2(cos(a0 + half), sin(a0 + half)) * r * 0.42
+		var reach := r * (1.0 if i % 2 == 0 else 0.68)
+		inner.append(right)
+		_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(cos(a0), sin(a0)) * reach, right, left]), col)
+	_canvas.draw_colored_polygon(inner, col)
 
 
 func _process(delta: float) -> void:
 	_time += delta
+	for i in range(_fx.size() - 1, -1, -1):
+		_fx[i].t += delta
+		if _fx[i].t >= _fx[i].dur:
+			_fx.remove_at(i)
+	_flash = maxf(0.0, _flash - delta * 4.0)
+	_combo_pop = maxf(0.0, _combo_pop - delta * 6.0)
+	_combo_t = maxf(0.0, _combo_t - delta)
+	if _combo_t <= 0.0:
+		combo = 0
 	_msg_t = maxf(0.0, _msg_t - delta)
 	_hurt = maxf(0.0, _hurt - delta * 2.5)
 	for i in range(_popups.size() - 1, -1, -1):
@@ -124,6 +331,10 @@ func _on_draw() -> void:
 			_draw_enemy_panel(enemy, w)
 			if enemy.state == Enemy.State.WINDUP:
 				_draw_threat(enemy, w, h)
+			if enemy.state == Enemy.State.STUNNED:
+				_draw_stun_stars(enemy)
+		_draw_fx(w, h)
+		_draw_combo(w, h)
 		_draw_popups()
 		_draw_message(w, h)
 		_draw_player(w, h, enemy)
@@ -222,6 +433,8 @@ func _draw_popups() -> void:
 		# Цифра «выстреливает» крупной и оседает
 		var pop := 1.0 + 0.7 * (1.0 - smoothstep(0.0, 0.18, t))
 		var fsize := int((40 if big else 27) * pop)
+		if bool(pp.get("crit", false)):
+			fsize = int(54 * pop)
 		_text(pp.text, pp.pos + Vector2(0, -80.0 * (1.0 - pow(1.0 - t / 0.9, 2.0))), fsize, c)
 
 

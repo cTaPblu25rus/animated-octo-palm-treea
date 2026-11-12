@@ -88,6 +88,9 @@ var _blade_mat: StandardMaterial3D     # свечение оружия при з
 var _eye_mat: StandardMaterial3D
 var _orb_mat: StandardMaterial3D
 var _eye_color := Color.ORANGE
+var _realistic := false
+var _skeleton: Skeleton3D
+var _head_bone := -1
 
 
 func setup(enemy_id: String, d: Dictionary, seed_value: int) -> void:
@@ -181,7 +184,7 @@ func _check_phase() -> bool:
 	combo = int(ph.get("combo", combo))
 	stagger = 0.0
 	_combo_left = 0
-	_model.scale.x = 1.0
+	_model.scale.x = absf(_model.scale.x)
 	_enter(State.RECOVER, 1.6)
 	_play("Taunt", 1.2, 0.1)
 	_anim.queue(ANIM_IDLE)
@@ -207,18 +210,18 @@ func _enter(s: int, dur: float) -> void:
 		State.IDLE:
 			weak_side = _rng.randi_range(0, 2)
 			_hits_in_idle = 0
-			_model.scale.x = 1.0
+			_model.scale.x = absf(_model.scale.x)
 			_play(ANIM_IDLE, 1.0, 0.25)
 		State.WINDUP:
 			windup_count += 1
 			attack_side = _sides[_rng.randi_range(0, _sides.size() - 1)]
 			# Удар слева — та же анимация, отражённая зеркально
-			_model.scale.x = -1.0 if attack_side == Side.LEFT else 1.0
+			_model.scale.x = absf(_model.scale.x) * (-1.0 if attack_side == Side.LEFT else 1.0)
 			var attack: String = ANIM_ATTACK[attack_side]
 			_play(attack, _len(attack) * HIT_FRACTION / dur, 0.1)
 			windup_started.emit(attack_side)
 		State.STUNNED:
-			_model.scale.x = 1.0
+			_model.scale.x = absf(_model.scale.x)
 			_play(ANIM_STUN, 1.6, 0.15)
 		State.DYING:
 			_play(ANIM_DEATH, _len(ANIM_DEATH) / dur, 0.1)
@@ -373,6 +376,24 @@ func _build(model_id: String, weapon_id: String, sc: float) -> void:
 	_orb.position = ORB_POS[Side.RIGHT]
 	_orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_body_root.add_child(_orb)
+
+
+## Пропорции: мультяшные (большая голова) или человеческие (голова меньше, фигура выше).
+func set_realistic(on: bool) -> void:
+	_realistic = on
+	_model.scale = Vector3(signf(_model.scale.x), 1.0, 1.0) * MODEL_SCALE * (Vector3(1.0, 1.15, 1.0) if on else Vector3.ONE)
+	if not _anim.mixer_applied.is_connected(_fix_proportions):
+		_anim.mixer_applied.connect(_fix_proportions)
+
+
+## Анимации сами пишут масштаб головы, поэтому поправляем его после каждого их применения.
+func _fix_proportions() -> void:
+	if not _realistic:
+		return
+	if _head_bone < 0:
+		_skeleton = _find(_model, "Skeleton3D")
+		_head_bone = _skeleton.find_bone("head")
+	_skeleton.set_bone_pose_scale(_head_bone, Vector3.ONE * 0.6)
 
 
 ## Полупрозрачный несветящийся слой поверх материала модели: цвет и сила задаются альфой.

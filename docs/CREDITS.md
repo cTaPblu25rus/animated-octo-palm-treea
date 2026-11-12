@@ -10,5 +10,7 @@
 | KayKit Dungeon Remastered 1.0 | Kay Lousberg | стены, пол, факелы, сундук, бочки, знамёна | https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0 |
 | KayKit Character Pack: Adventurers 1.0 | Kay Lousberg | меч и щит героя | https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 |
 
+| Poly Haven: Castle Brick 07, Cobblestone Floor 08 | Poly Haven | камень стен и пола в реалистичном стиле | https://polyhaven.com/a/castle_brick_07 · https://polyhaven.com/a/cobblestone_floor_08 |
+
 Это временная графика для прототипа. Свой визуальный стиль (см. `docs/GDD.md`,
 раздел «Арт») делаем позже и заменяем модели по одной.
