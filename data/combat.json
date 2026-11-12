@@ -38,10 +38,11 @@
 				"left",
 				"right"
 			],
-			"color": "#5a4f45",
 			"eyes": "#ff7a1a",
 			"scale": 1.0,
-			"guard_hits": 2
+			"guard_hits": 2,
+			"model": "minion",
+			"weapon": "blade"
 		},
 		"ash_veteran": {
 			"name": "Мертвец-ветеран",
@@ -58,10 +59,11 @@
 				"right",
 				"top"
 			],
-			"color": "#4b4a52",
 			"eyes": "#ff4d1a",
 			"scale": 1.08,
-			"guard_hits": 2
+			"guard_hits": 2,
+			"model": "rogue",
+			"weapon": "blade"
 		},
 		"ash_captain": {
 			"name": "Пепельный капитан",
@@ -78,10 +80,11 @@
 				"right",
 				"top"
 			],
-			"color": "#3d3540",
 			"eyes": "#ff2a2a",
 			"scale": 1.2,
-			"guard_hits": 3
+			"guard_hits": 3,
+			"model": "warrior",
+			"weapon": "axe"
 		}
 	}
 }
