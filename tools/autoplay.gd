@@ -22,7 +22,7 @@ var _hold_t := -1.0          # >0: палец удержан, отпустить
 var _queue: Array = []       # отложенные свайпы: [задержка, направление]
 var _shot_t := 0.0
 var _shot_n := 0
-var _last_state := -1
+var _last_windup := -1
 var _room_t := 0.0
 
 
@@ -74,10 +74,9 @@ func _process(delta: float) -> void:
 	var e: Enemy = game.enemy
 	if e == null or not e.is_alive() or e.state == Enemy.State.APPEAR:
 		return
-	if e.state != _last_state:
-		_last_state = e.state
-		if e.state == Enemy.State.WINDUP:
-			_reacted_windup = false
+	if e.windup_count != _last_windup:
+		_last_windup = e.windup_count
+		_reacted_windup = false
 	if e.state == Enemy.State.WINDUP:
 		_react(e)
 		return
@@ -96,6 +95,8 @@ func _react(e: Enemy) -> void:
 		return
 	var window: float = float(game.p.parry_window)
 	var kind: String = REACTIONS[_reaction % REACTIONS.size()]
+	if e.combo > 1 or game.stamina < 40.0:
+		kind = "parry"      # в серии босса и без сил надёжно только парирование
 	var lead := window * 0.5 if kind == "parry" else 0.35
 	if e.time_to_impact() > lead:
 		return
@@ -156,6 +157,8 @@ func _finish() -> void:
 	for kind in ["fight", "chest", "altar", "event"]:
 		if not game.visited.has(kind):
 			missing.append("комната " + kind)
+	if int(s.boss) == 0:
+		missing.append("босс не побеждён")
 	if int(s.rooms) != game.rooms.size():
 		missing.append("пройдено комнат %d из %d" % [s.rooms, game.rooms.size()])
 	if missing.is_empty():
@@ -175,7 +178,7 @@ func _end(code: int) -> void:
 	done = true
 	Engine.time_scale = 1.0
 	if shots_dir != "":
-		await get_tree().create_timer(0.5).timeout
+		await get_tree().create_timer(3.0).timeout
 		_shot("final")
 	get_tree().quit(code)
 

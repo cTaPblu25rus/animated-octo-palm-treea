@@ -8,6 +8,7 @@ signal windup_started(side: int)
 signal struck(side: int, damage: float)
 signal stunned
 signal died
+signal phase_changed(index: int, title: String)
 
 enum Side { LEFT, RIGHT, TOP }
 enum State { APPEAR, IDLE, WINDUP, RECOVER, STUNNED, DYING, DEAD }
@@ -64,6 +65,14 @@ var parry_window := 0.25
 ## Сколько ударов враг терпит в стойке, прежде чем ответить контратакой.
 var guard_hits := 2
 var _hits_in_idle := 0
+## Босс: фазы по порогам здоровья меняют длину замаха и число ударов подряд.
+var is_boss := false
+var phase := 0
+var windup_time := 1.0
+var combo := 1
+var _combo_left := 0
+## Счётчик замахов — по нему автоигрок отличает новый удар внутри серии.
+var windup_count := 0
 
 var _rng := RandomNumberGenerator.new()
 var _sides: Array[int] = []
@@ -89,12 +98,14 @@ func setup(enemy_id: String, d: Dictionary, seed_value: int) -> void:
 	hp = max_hp
 	stagger_max = float(d.get("stagger_max", 100))
 	guard_hits = int(d.get("guard_hits", 2))
+	is_boss = bool(d.get("boss", false))
+	windup_time = float(d.get("windup", 1.0))
 	_rng.seed = seed_value
 	for s in d.get("sides", ["left", "right"]):
 		_sides.append(int(SIDE_BY_NAME[s]))
 	_eye_color = Color.html(str(d.get("eyes", "#ff7a1a")))
 	_build(str(d.get("model", "minion")), str(d.get("weapon", "blade")), float(d.get("scale", 1.0)))
-	_enter(State.APPEAR, APPEAR_TIME)
+	_enter(State.APPEAR, float(d.get("appear_time", APPEAR_TIME)))
 
 
 func is_alive() -> bool:
@@ -119,6 +130,8 @@ func take_hit(damage: float, stagger_add: float) -> void:
 	if hp <= 0.0:
 		_enter(State.DYING, DYING_TIME)
 		return
+	if _check_phase():
+		return
 	if state == State.IDLE or state == State.RECOVER:
 		_play(ANIM_HIT, 1.3, 0.05)
 		_anim.queue(ANIM_IDLE)
@@ -132,7 +145,7 @@ func take_hit(damage: float, stagger_add: float) -> void:
 		_hits_in_idle += 1
 		weak_side = (weak_side + _rng.randi_range(1, 2)) % 3
 		if _hits_in_idle >= guard_hits:
-			_enter(State.WINDUP, float(data.get("windup", 1.0)))
+			_start_attack()
 
 
 ## Удачное парирование: удар отменён, враг отброшен в восстановление.
@@ -140,6 +153,7 @@ func parried(stagger_add: float) -> void:
 	if state != State.WINDUP:
 		return
 	_shake = 0.6
+	_combo_left = 0
 	stagger += stagger_add
 	if stagger >= stagger_max:
 		_stun()
@@ -149,7 +163,34 @@ func parried(stagger_add: float) -> void:
 		_anim.queue(ANIM_IDLE)
 
 
+func _start_attack() -> void:
+	_combo_left = combo - 1
+	_enter(State.WINDUP, windup_time)
+
+
+## Переход в следующую фазу, когда здоровье упало ниже порога. Возвращает true, если фаза сменилась.
+func _check_phase() -> bool:
+	var phases: Array = data.get("phases", [])
+	if phase >= phases.size():
+		return false
+	var ph: Dictionary = phases[phase]
+	if hp / max_hp > float(ph.hp):
+		return false
+	phase += 1
+	windup_time = float(ph.get("windup", windup_time))
+	combo = int(ph.get("combo", combo))
+	stagger = 0.0
+	_combo_left = 0
+	_model.scale.x = 1.0
+	_enter(State.RECOVER, 1.6)
+	_play("Taunt", 1.2, 0.1)
+	_anim.queue(ANIM_IDLE)
+	phase_changed.emit(phase, str(ph.get("title", "")))
+	return true
+
+
 func _stun() -> void:
+	_combo_left = 0
 	stagger = stagger_max
 	_enter(State.STUNNED, float(data.get("stun_time", 2.0)))
 	stunned.emit()
@@ -161,13 +202,15 @@ func _enter(s: int, dur: float) -> void:
 	state_dur = dur
 	match s:
 		State.APPEAR:
-			_play(ANIM_APPEAR, _len(ANIM_APPEAR) / dur, 0.0)
+			var appear := str(data.get("appear_anim", ANIM_APPEAR))
+			_play(appear, _len(appear) / dur, 0.0)
 		State.IDLE:
 			weak_side = _rng.randi_range(0, 2)
 			_hits_in_idle = 0
 			_model.scale.x = 1.0
 			_play(ANIM_IDLE, 1.0, 0.25)
 		State.WINDUP:
+			windup_count += 1
 			attack_side = _sides[_rng.randi_range(0, _sides.size() - 1)]
 			# Удар слева — та же анимация, отражённая зеркально
 			_model.scale.x = -1.0 if attack_side == Side.LEFT else 1.0
@@ -190,10 +233,16 @@ func _process(delta: float) -> void:
 				_enter(State.IDLE, _idle_time())
 		State.IDLE:
 			if state_t >= state_dur:
-				_enter(State.WINDUP, float(data.get("windup", 1.0)))
+				_start_attack()
 		State.WINDUP:
 			if state_t >= state_dur:
 				var side := attack_side
+				if _combo_left > 0:
+					# Серия: следующий удар без передышки, замах короче
+					_combo_left -= 1
+					_enter(State.WINDUP, windup_time * 0.8)
+					struck.emit(side, float(data.get("damage", 10)))
+					return
 				_enter(State.RECOVER, float(data.get("recover", 0.7)))
 				# Довести удар в обычном темпе (та же анимация продолжается без рестарта)
 				_anim.play(ANIM_ATTACK[side], -1, 1.3)

@@ -20,7 +20,8 @@ const RUN_PATH := "res://data/run.json"
 const WALK_TIME := 1.5
 const WALK_DISTANCE := 3.2
 const CLEARED_DELAY := 1.5
-const KIND_NAMES := {"fight": "Бой", "chest": "Сундук", "altar": "Алтарь Зари", "event": "Находка"}
+const CUT_TIME := 9.0
+const KIND_NAMES := {"boss": "Логово босса", "fight": "Бой", "chest": "Сундук", "altar": "Алтарь Зари", "event": "Находка"}
 const ENEMY_POS := Vector3(0.0, 0.0, -2.3)
 const CAMERA_POS := Vector3(0.0, 1.62, 0.0)
 const NEXT_ENEMY_DELAY := 1.3
@@ -63,6 +64,12 @@ var shards := 0
 var gold := 0
 var damage_mult := 1.0
 var visited := {}
+var cut_t := 0.0                # время кат-сцены после босса, читает HUD
+var white := 0.0                # белая вспышка рассвета в кат-сцене
+var _env: Environment
+var _moon: DirectionalLight3D
+var _dawn: OmniLight3D
+var _dawn_glow: StandardMaterial3D
 var fade := 1.0                 # затемнение экрана при переходе, читает HUD
 var _walk_t := 0.0
 var _prop: Node3D
@@ -73,7 +80,7 @@ var _run_rng := RandomNumberGenerator.new()
 
 ## Счётчики для автоигрока и итогового экрана.
 var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
-	"charged": 0, "stuns": 0, "rooms": 0, "taken": 0.0, "hurt": 0, "kills": 0}
+	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
 var hud: CanvasLayer
@@ -163,6 +170,8 @@ func _process(delta: float) -> void:
 			_between_t -= delta
 			if _between_t <= 0.0:
 				_next_room()
+		"cutscene":
+			_run_cutscene(delta)
 		"walk":
 			_walk_t -= delta
 			fade = clampf(_walk_t / WALK_TIME * 1.6 - 0.3, 0.0, 1.0)
@@ -178,12 +187,13 @@ func _spawn_next() -> void:
 	if wave_index >= wave.size():
 		var reward := int(run_cfg.fight_shards)
 		shards += reward
-		hud.say("Комната очищена  +%d оск." % reward, Color(1.0, 0.85, 0.4), 1.3)
+		if str(room.kind) != "boss":
+			hud.say("Комната очищена  +%d оск." % reward, Color(1.0, 0.85, 0.4), 1.3)
 		_room_cleared()
 		return
 	var id: String = wave[wave_index]
 	enemy = Enemy.new()
-	enemy.position = ENEMY_POS
+	enemy.position = Vector3(0.0, 0.0, -float(cfg.enemies[id].get("distance", -ENEMY_POS.z)))
 	add_child(enemy)
 	enemy.setup(id, cfg.enemies[id], _run_rng.randi())
 	enemy.parry_window = float(p.parry_window)
@@ -191,8 +201,10 @@ func _spawn_next() -> void:
 	enemy.struck.connect(_on_struck)
 	enemy.stunned.connect(_on_stunned)
 	enemy.died.connect(_on_died)
+	enemy.phase_changed.connect(_on_phase)
 	state = "fight"
-	hud.say(enemy.display_name, Color(0.9, 0.85, 0.8), 1.4)
+	if not enemy.is_boss:
+		hud.say(enemy.display_name, Color(0.9, 0.85, 0.8), 1.4)
 
 
 func _on_windup(_side: int) -> void:
@@ -203,6 +215,13 @@ func _on_stunned() -> void:
 	stats.stuns += 1
 	sfx.play("stun", -3.0)
 	hud.say("Оглушён! Бей!", Color(1.0, 0.9, 0.3), 1.2)
+
+
+func _on_phase(_index: int, title: String) -> void:
+	sfx.play("death", -3.0, 1.4)
+	hud.say(title, Color(1.0, 0.35, 0.25), 1.8)
+	_shake = maxf(_shake, 0.9)
+	_buzz(150)
 
 
 func _on_died() -> void:
@@ -293,7 +312,7 @@ func _next_room() -> void:
 func _arrive() -> void:
 	fade = 0.0
 	stats.rooms += 1
-	if str(room.kind) == "fight":
+	if str(room.kind) == "fight" or str(room.kind) == "boss":
 		wave = room.wave
 		wave_index = -1
 		_spawn_next()
@@ -306,6 +325,12 @@ func _arrive() -> void:
 
 
 func _room_cleared() -> void:
+	if str(room.kind) == "boss":
+		state = "cutscene"
+		cut_t = 0.0
+		charging = false
+		stats.boss = 1
+		return
 	state = "cleared"
 	_between_t = CLEARED_DELAY
 	charging = false
@@ -348,7 +373,27 @@ func _apply_event(ev: Dictionary) -> void:
 	hud.say(str(ev.result), Color(0.95, 0.9, 0.7), 1.5)
 
 
+## Кат-сцена победы: за решёткой разгорается заря, туман теплеет, герой идёт к свету.
+func _run_cutscene(delta: float) -> void:
+	cut_t += delta
+	var k := smoothstep(0.8, 6.5, cut_t)
+	_dawn.light_energy = 6.0 * k
+	_dawn_glow.albedo_color = Color(0.02, 0.02, 0.03).lerp(Color(1.0, 0.86, 0.55), k)
+	_env.fog_light_color = Color(0.08, 0.1, 0.16).lerp(Color(0.95, 0.7, 0.4), k)
+	_env.fog_density = lerpf(0.075, 0.035, k)
+	_env.ambient_light_color = Color(0.25, 0.3, 0.42).lerp(Color(1.0, 0.85, 0.65), k)
+	_env.ambient_light_energy = lerpf(0.45, 1.0, k)
+	_moon.light_energy = lerpf(0.35, 0.0, k)
+	white = smoothstep(CUT_TIME - 2.2, CUT_TIME - 0.6, cut_t)
+	if cut_t >= CUT_TIME:
+		state = "victory"
+		sfx.play("victory", -2.0)
+		_buzz(120)
+
+
 func _walk_offset() -> float:
+	if state == "cutscene" or (state == "victory" and cut_t > 0.0):
+		return -6.5 * smoothstep(1.2, CUT_TIME, cut_t)
 	if state != "walk":
 		return 0.0
 	var k := clampf(_walk_t / WALK_TIME, 0.0, 1.0)
@@ -440,6 +485,10 @@ func on_gesture(kind: String) -> void:
 	if state == "room":
 		if kind == "tap":
 			_use_room()
+		return
+	if state == "cutscene":
+		if kind == "tap" and cut_t > 1.0:
+			cut_t = maxf(cut_t, CUT_TIME - 1.2)     # тап пропускает сцену
 		return
 	if state != "fight":
 		charging = false
@@ -650,8 +699,11 @@ func _animate_view(delta: float) -> void:
 			rest = Vector3(0.5, 0.0, -0.6) + Vector3(sin(_time * 50.0), 0, 0) * 0.015 * minf(charge_t * 3.0, 1.0)
 		_sword.rotation = _sword.rotation.lerp(rest, 1.0 - exp(-8.0 * delta))
 
-	# Щит поднимается при блоке
+	# Щит поднимается при блоке; в кат-сцене руки опускаются
 	var shield_target := SHIELD_UP if block_t > 0.0 else SHIELD_REST
+	if cut_t > 0.0:
+		shield_target = SHIELD_REST + Vector3(0, -0.5, 0)
+	_sword.position = _sword.position.lerp(SWORD_POS + Vector3(0, -0.6 if cut_t > 0.0 else 0.0, 0), 1.0 - exp(-2.5 * delta))
 	_shield.position = _shield.position.lerp(shield_target, 1.0 - exp(-22.0 * delta))
 
 	# Уклонение: камера уходит в сторону и возвращается
@@ -685,6 +737,21 @@ func _build_room() -> void:
 	e.fog_light_color = Color(0.08, 0.1, 0.16)
 	e.fog_density = 0.075
 	env.environment = e
+	_env = e
+
+	# Заря за решёткой: до кат-сцены погашена
+	_dawn_glow = _glow_mat(Color(0.02, 0.02, 0.03))
+	var dawn_plane := BoxMesh.new()
+	dawn_plane.size = Vector3(5.0, 4.2, 0.1)
+	_static(dawn_plane, Vector3(0, 2.0, -11.4), _dawn_glow)
+	_dawn = OmniLight3D.new()
+	_dawn.position = Vector3(0, 2.2, -9.2)
+	_dawn.light_color = Color(1.0, 0.8, 0.5)
+	_dawn.light_energy = 0.0
+	_dawn.omni_range = 16.0
+	_dawn.omni_attenuation = 0.8
+	_dawn.shadow_enabled = false
+	add_child(_dawn)
 	add_child(env)
 
 	var stone_dark := _mat(Color(0.1, 0.095, 0.11), 0.95)
@@ -731,6 +798,7 @@ func _build_room() -> void:
 
 	# Холодный «лунный» свет сверху — читаемость силуэта врага
 	var moon := DirectionalLight3D.new()
+	_moon = moon
 	moon.rotation_degrees = Vector3(-55.0, 20.0, 0.0)
 	moon.light_color = Color(0.55, 0.65, 0.9)
 	moon.light_energy = 0.35
