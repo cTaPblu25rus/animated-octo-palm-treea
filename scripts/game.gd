@@ -1359,14 +1359,15 @@ func _hitstop(sec: float) -> void:
 
 ## Музыка по состоянию игры: меню, подземелье, бой, босс; в кат-сцене и на итоге — тема меню.
 func _update_music() -> void:
-	var track := "dungeon"
+	# «game» — основная тема забега (подземелье и обычные бои), прислана режиссёром проекта
+	var track := "game"
 	match state:
 		"title", "victory", "cutscene":
 			track = "menu"
 		"defeat":
 			track = ""
 		"fight", "between", "loot", "choice":
-			track = "fight" if str(room.get("kind", "")) in ["fight", "elite"] else "dungeon"
+			track = "game"
 	if state != "title" and str(room.get("kind", "")) == "boss" and state in ["fight", "between", "walk", "loot"]:
 		track = "boss"
 	music.play(track)
