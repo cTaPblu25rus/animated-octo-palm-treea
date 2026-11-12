@@ -1,0 +1,18 @@
+{
+	"length": 7,
+	"required": ["chest", "altar", "event"],
+	"fight_shards": 3,
+	"fights": {
+		"first": [["ash_dead"]],
+		"middle": [["ash_dead", "ash_dead"], ["ash_veteran"], ["ash_dead", "ash_veteran"]],
+		"final": [["ash_veteran", "ash_captain"]]
+	},
+	"chest": {"shards_min": 4, "shards_max": 8, "gold_min": 15, "gold_max": 35},
+	"altar": {"heal": 0.35},
+	"events": [
+		{"text": "Тело павшего стража. Его точильный камень ещё цел.", "result": "Клинок острее: урон +15%", "effect": "damage", "value": 0.15},
+		{"text": "В нише тлеет лампада Зари.", "result": "Силы возвращаются: +20 здоровья", "effect": "heal", "value": 20},
+		{"text": "Кошель, оброненный беглецом.", "result": "Золото: +25", "effect": "gold", "value": 25},
+		{"text": "Из трещины сочится пепельный туман.", "result": "Туман жжёт лёгкие: −8 здоровья, но в пепле блестят осколки: +5", "effect": "ash", "value": 8}
+	]
+}

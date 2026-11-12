@@ -9,7 +9,7 @@
 extends Node
 
 const Enemy := preload("res://scripts/enemy.gd")
-const TIMEOUT := 240.0
+const TIMEOUT := 420.0
 const REACTIONS := ["parry", "block", "parry", "dodge"]
 
 var game: Node
@@ -23,6 +23,7 @@ var _queue: Array = []       # отложенные свайпы: [задерж�
 var _shot_t := 0.0
 var _shot_n := 0
 var _last_state := -1
+var _room_t := 0.0
 
 
 func _ready() -> void:
@@ -31,7 +32,10 @@ func _ready() -> void:
 			shots_dir = a.trim_prefix("--shots=")
 			DirAccess.make_dir_recursive_absolute(shots_dir)
 	Engine.time_scale = 3.0 if shots_dir == "" else 1.0
-	print("BOT: старт, врагов в волне: %d" % game.wave.size())
+	var kinds: Array = []
+	for r: Dictionary in game.rooms:
+		kinds.append(r.kind)
+	print("BOT: старт, сид %d, комнаты: %s" % [game.run_seed, ", ".join(kinds)])
 
 
 func _process(delta: float) -> void:
@@ -51,6 +55,17 @@ func _process(delta: float) -> void:
 		_fail("страж пал" if game.state == "defeat" else "таймаут")
 		return
 	_run_queue(delta)
+	if game.state == "room":
+		_room_t += delta
+		if _room_t > 0.8:
+			_room_t = 0.0
+			var c := _center()
+			game.gestures.press(c)
+			game.gestures.release(c)
+		return
+	_room_t = 0.0
+	if game.state != "fight":
+		return
 	if _hold_t > 0.0:
 		_hold_t -= delta
 		if _hold_t <= 0.0:
@@ -138,8 +153,14 @@ func _finish() -> void:
 	for key in ["weak_hits", "parries", "blocks", "dodges", "charged"]:
 		if int(s[key]) == 0:
 			missing.append(key)
+	for kind in ["fight", "chest", "altar", "event"]:
+		if not game.visited.has(kind):
+			missing.append("комната " + kind)
+	if int(s.rooms) != game.rooms.size():
+		missing.append("пройдено комнат %d из %d" % [s.rooms, game.rooms.size()])
 	if missing.is_empty():
-		print("BOT: КОМНАТА ОЧИЩЕНА, все приёмы сработали")
+		print("BOT: ЗАБЕГ ПРОЙДЕН (сид %d, осколки %d, золото %d), все приёмы и типы комнат сработали" % [
+			game.run_seed, game.shards, game.gold])
 		await _end(0)
 	else:
 		_fail("не сработали приёмы: " + ", ".join(missing))

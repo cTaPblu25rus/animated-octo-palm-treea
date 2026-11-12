@@ -4,6 +4,9 @@
 extends CanvasLayer
 
 const Enemy := preload("res://scripts/enemy.gd")
+const ROOM_HINTS := {"chest": "открыть сундук", "altar": "коснуться алтаря", "event": "осмотреть"}
+const PIP_COLORS := {"fight": Color(0.85, 0.25, 0.2), "chest": Color(1.0, 0.8, 0.3),
+	"altar": Color(0.5, 0.8, 1.0), "event": Color(0.75, 0.6, 0.9)}
 
 var game: Node
 
@@ -73,6 +76,19 @@ func _on_draw() -> void:
 		_canvas.draw_rect(Rect2(0, 0, w, edge * 0.6), Color(0.8, 0.05, 0.02, a * 0.7))
 		_canvas.draw_rect(Rect2(0, h - edge * 0.6, w, edge * 0.6), Color(0.8, 0.05, 0.02, a * 0.7))
 
+	# Путь забега: точки комнат, текущая крупнее
+	var n: int = game.rooms.size()
+	var step := 22.0
+	var px0 := w * 0.5 - step * (n - 1) * 0.5
+	for i in n:
+		var kind: String = game.rooms[i].kind
+		var pc: Color = PIP_COLORS[kind]
+		if i > game.room_index:
+			pc.a = 0.35
+		var r := 6.5 if i == game.room_index else 4.0
+		_canvas.draw_circle(Vector2(px0 + i * step, 18), r + 1.5, Color(0, 0, 0, 0.6))
+		_canvas.draw_circle(Vector2(px0 + i * step, 18), r, pc)
+
 	# Враг: имя, здоровье, стойкость
 	if enemy != null and enemy.state != Enemy.State.DEAD:
 		var bw := w * 0.7
@@ -110,22 +126,33 @@ func _on_draw() -> void:
 	var px := (w - pw) * 0.5
 	_bar(Rect2(px, h - 92, pw, 16), game.hp / game.max_hp, Color(0.25, 0.75, 0.35))
 	_bar(Rect2(px, h - 70, pw, 9), game.stamina / game.max_stamina, Color(0.35, 0.65, 1.0))
+	_text("Осколки: %d    Золото: %d" % [game.shards, game.gold], Vector2(w * 0.5, h - 14), 14, Color(0.9, 0.82, 0.6, 0.9))
 	if game.block_t > 0.0:
 		_text("ЩИТ", Vector2(w * 0.5, h - 38), 18, Color(0.75, 0.85, 1.0))
 	elif game.charging:
 		var k := clampf(game.charge_t / float(game.p.charge_time), 0.0, 1.0)
 		_bar(Rect2(w * 0.3, h - 46, w * 0.4, 8), k, Color(1.0, 0.6, 0.2) if k < 1.0 else Color(1.0, 0.95, 0.5))
 
+	# Затемнение при переходе между комнатами
+	if game.fade > 0.0:
+		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, game.fade))
+		if game.state == "walk" and game.room_index < n:
+			var fc := Color(0.85, 0.82, 0.75, game.fade)
+			_text("Комната %d из %d" % [game.room_index + 1, n], Vector2(w * 0.5, h * 0.45), 26, fc)
+
 	# Итог
 	if game.state == "victory" or game.state == "defeat":
 		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.55))
 		var ok: bool = game.state == "victory"
-		_text("Комната очищена" if ok else "Страж пал", Vector2(w * 0.5, h * 0.4), 36,
+		_text("Забег пройден" if ok else "Страж пал", Vector2(w * 0.5, h * 0.4), 36,
 			Color(1.0, 0.85, 0.4) if ok else Color(1.0, 0.35, 0.3))
 		var s: Dictionary = game.stats
 		_text("Точных ударов: %d   Парирований: %d" % [s.weak_hits, s.parries], Vector2(w * 0.5, h * 0.47), 18, Color.WHITE)
 		_text("Блоков: %d   Уклонений: %d   Получено урона: %d" % [s.blocks, s.dodges, roundi(s.taken)],
 			Vector2(w * 0.5, h * 0.51), 18, Color.WHITE)
+		_text("Комнат: %d из %d   Осколки: %d   Золото: %d" % [s.rooms, n, game.shards, game.gold],
+			Vector2(w * 0.5, h * 0.55), 18, Color(1.0, 0.88, 0.6))
+		_text("Сид забега: %d" % game.run_seed, Vector2(w * 0.5, h * 0.67), 14, Color(0.7, 0.7, 0.75))
 		_text("Тап — заново", Vector2(w * 0.5, h * 0.62), 22, Color(0.85, 0.85, 0.9, 0.6 + 0.4 * sin(_time * 4.0)))
 
 
@@ -149,6 +176,8 @@ func _draw_threat(enemy: Enemy, w: float, h: float) -> void:
 
 
 func _hint(enemy: Enemy) -> String:
+	if game.state == "room":
+		return "Тап — " + str(ROOM_HINTS[game.room.kind])
 	if enemy == null or game.state != "fight":
 		return ""
 	if enemy.state == Enemy.State.WINDUP:

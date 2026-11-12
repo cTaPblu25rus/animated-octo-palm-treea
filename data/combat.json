@@ -83,10 +83,5 @@
 			"scale": 1.2,
 			"guard_hits": 3
 		}
-	},
-	"wave": [
-		"ash_dead",
-		"ash_veteran",
-		"ash_captain"
-	]
+	}
 }
