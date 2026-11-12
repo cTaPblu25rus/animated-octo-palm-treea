@@ -36,7 +36,7 @@ var choice_options: Array = []     # [{title, text, color, tag, enabled, icon}]
 var _cards: Array[Button] = []
 var _picking := false
 var _stage: Control
-var _preview: Node3D
+var _preview: TextureRect
 var _loot_color := Color.WHITE
 var _loot_rarity := 0
 var _loot_t := 0.0
@@ -91,7 +91,7 @@ func show_loot(weapon: Dictionary) -> void:
 	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stage.draw.connect(_draw_stage)
 	_loot_box.add_child(_stage)
-	_build_preview(cfg.weapons[weapon.id])
+	_build_preview(str(weapon.id))
 
 	var name_l := _label(Items.title(cfg, weapon), 27, col, true)
 	_loot_box.add_child(name_l)
@@ -152,45 +152,21 @@ func show_loot(weapon: Dictionary) -> void:
 		game.sfx.play("parry", -8.0 + 2.0 * rarity, 1.4 - 0.12 * rarity)
 
 
-## Сцена предпросмотра: отдельный 3D-мир с моделью оружия, камерой и светом.
-func _build_preview(base: Dictionary) -> void:
-	var holder := SubViewportContainer.new()
-	holder.stretch = true
-	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
-	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_stage.add_child(holder)
-	var vp := SubViewport.new()
-	vp.own_world_3d = true
-	vp.transparent_bg = true
-	vp.msaa_3d = Viewport.MSAA_2X
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	holder.add_child(vp)
-	var env := WorldEnvironment.new()
-	var e := Environment.new()
-	e.background_mode = Environment.BG_CLEAR_COLOR
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(1, 1, 1)
-	e.ambient_light_energy = 0.75
-	env.environment = e
-	vp.add_child(env)
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-35, 30, 0)
-	sun.light_energy = 1.3
-	vp.add_child(sun)
-	var cam := Camera3D.new()
-	cam.position = Vector3(0, 0, 3.4)
-	cam.fov = 34.0
-	vp.add_child(cam)
-	_preview = Node3D.new()
-	_preview.rotation.z = -0.45
-	_preview.scale = Vector3.ZERO
-	vp.add_child(_preview)
-	var scene: PackedScene = load("res://assets/kaykit/hero/%s.gltf" % str(base.model))
-	var model: Node3D = scene.instantiate()
-	var k := float(base.scale) * 3.3
-	model.scale = Vector3.ONE * k
-	model.position = Vector3(0, -0.58 * k, 0)
-	_preview.add_child(model)
+## Картинка оружия поверх лучей. Это заранее отрисованное изображение (tools/render_weapons.gd),
+## а не 3D-окно: отдельные SubViewport на части телефонов ломают отрисовку всего экрана.
+func _build_preview(weapon_id: String) -> void:
+	_preview = TextureRect.new()
+	var path := "res://assets/weapons/%s.png" % weapon_id
+	if ResourceLoader.exists(path):
+		_preview.texture = load(path)
+	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_preview.size = Vector2(220, 220)
+	_preview.pivot_offset = _preview.size * 0.5
+	_preview.position = Vector2(412, 230) * 0.5 - _preview.size * 0.5
+	_preview.scale = Vector2.ZERO
+	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stage.add_child(_preview)
 
 
 func _process(delta: float) -> void:
@@ -201,12 +177,13 @@ func _process(delta: float) -> void:
 		return
 	_loot_t += delta
 	if _preview != null:
-		# Оружие «выпрыгивает» с перелётом и раскручивается, потом вращается спокойно
+		# Оружие «выпрыгивает» с перелётом и раскручивается, потом покачивается
 		var k := clampf((_loot_t - 0.25) / 0.45, 0.0, 1.0)
 		var back := 1.0 + 2.70158 * pow(k - 1.0, 3.0) + 1.70158 * pow(k - 1.0, 2.0)
-		_preview.scale = Vector3.ONE * maxf(0.001, back)
-		_preview.rotation.y += delta * (1.3 + 14.0 * exp(-_loot_t * 2.6))
-		_preview.position.y = sin(_loot_t * 2.0) * 0.05
+		_preview.scale = Vector2.ONE * maxf(0.0, back) * (1.0 + 0.03 * sin(_loot_t * 3.0))
+		_preview.rotation = TAU * 2.0 * exp(-_loot_t * 4.0) + sin(_loot_t * 1.6) * 0.12
+		_preview.position.y = (_stage.size.y - _preview.size.y) * 0.5 + sin(_loot_t * 2.0) * 6.0
+		_preview.position.x = (_stage.size.x - _preview.size.x) * 0.5
 	_stage.queue_redraw()
 
 
