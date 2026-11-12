@@ -1,12 +1,21 @@
-## Сенсорный HUD боя: здоровье и стойкость врага сверху, стрелка стороны удара,
-## всплывающие цифры урона, сообщения, полоски игрока и зона жестов снизу.
-## Рисуется через _draw() одного Control — без лишних нод.
+## Сенсорный HUD: панель врага с рамкой и «следом» урона, путь забега со значками,
+## кошель с осколками и золотом, полосы героя, стрелка удара, всплывающие цифры,
+## заставка босса, кат-сцена победы и экран итога.
+## Всё рисуется кодом через _draw() одного Control: без картинок и лишних нод.
 extends CanvasLayer
 
 const Enemy := preload("res://scripts/enemy.gd")
+
+const GOLD := Color(0.96, 0.78, 0.36)
+const GOLD_DARK := Color(0.45, 0.3, 0.12)
+const INK := Color(0.07, 0.06, 0.09)
+const PARCHMENT := Color(0.96, 0.92, 0.82)
+const HP_RED := Color(0.86, 0.16, 0.14)
+const HP_GREEN := Color(0.36, 0.8, 0.32)
+const STAMINA := Color(0.3, 0.66, 1.0)
 const ROOM_HINTS := {"chest": "открыть сундук", "altar": "коснуться алтаря", "event": "осмотреть"}
-const PIP_COLORS := {"fight": Color(0.85, 0.25, 0.2), "chest": Color(1.0, 0.8, 0.3),
-	"altar": Color(0.5, 0.8, 1.0), "event": Color(0.75, 0.6, 0.9)}
+const PIP_COLORS := {"fight": Color(0.86, 0.3, 0.24), "chest": Color(1.0, 0.8, 0.3),
+	"altar": Color(0.5, 0.82, 1.0), "event": Color(0.78, 0.62, 0.95), "boss": Color(0.75, 0.1, 0.2)}
 
 var game: Node
 
@@ -19,10 +28,20 @@ var _msg_dur := 1.0
 var _hurt := 0.0
 var _popups: Array[Dictionary] = []
 var _time := 0.0
+var _vignette: GradientTexture2D
+var _shade_bottom: GradientTexture2D
+var _shade_top: GradientTexture2D
+var _enemy_trail := 1.0       # «след» урона на полосе врага
+var _hp_trail := 1.0          # и на полосе героя
+var _result_t := 0.0
+var _boss_card := 0.0
 
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
+	_vignette = _radial(Color(0, 0, 0, 0), Color(0, 0, 0, 0.62))
+	_shade_bottom = _linear(Color(0, 0, 0, 0), Color(0.02, 0.01, 0.04, 0.85))
+	_shade_top = _linear(Color(0.02, 0.01, 0.04, 0.75), Color(0, 0, 0, 0))
 	_canvas = Control.new()
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -46,7 +65,7 @@ func popup(text: String, world_pos: Vector3, color: Color, big: bool) -> void:
 	var cam: Camera3D = game.camera
 	if cam == null or cam.is_position_behind(world_pos):
 		return
-	var pos := cam.unproject_position(world_pos) + Vector2(randf_range(-30, 30), 0)
+	var pos := cam.unproject_position(world_pos) + Vector2(randf_range(-36, 36), randf_range(-10, 10))
 	_popups.append({"text": text, "pos": pos, "t": 0.0, "color": color, "big": big})
 
 
@@ -58,6 +77,16 @@ func _process(delta: float) -> void:
 		_popups[i].t += delta
 		if _popups[i].t > 0.9:
 			_popups.remove_at(i)
+	# «След» урона догоняет настоящее значение с задержкой
+	var enemy: Enemy = game.enemy
+	var enemy_k := enemy.hp / enemy.max_hp if enemy != null else 1.0
+	_enemy_trail = enemy_k if enemy_k > _enemy_trail else move_toward(_enemy_trail, enemy_k, delta * 0.45)
+	var hp_k: float = game.hp / game.max_hp
+	_hp_trail = hp_k if hp_k > _hp_trail else move_toward(_hp_trail, hp_k, delta * 0.35)
+	var ended: bool = game.state == "victory" or game.state == "defeat"
+	_result_t = _result_t + delta if ended else 0.0
+	var boss_intro := enemy != null and enemy.is_boss and enemy.state == Enemy.State.APPEAR
+	_boss_card = move_toward(_boss_card, 1.0 if boss_intro else 0.0, delta * 2.5)
 	_canvas.queue_redraw()
 
 
@@ -66,137 +95,409 @@ func _on_draw() -> void:
 	var w := size.x
 	var h := size.y
 	var enemy: Enemy = game.enemy
+	var cinematic: bool = game.state == "cutscene" or _boss_card > 0.01
+
+	# Виньетка и затемнения под интерфейс
+	_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false)
+	_canvas.draw_texture_rect(_shade_top, Rect2(0, 0, w, 150), false)
+	_canvas.draw_texture_rect(_shade_bottom, Rect2(0, h - 230, w, 230), false)
 
 	# Красная вспышка по краям при получении урона
 	if _hurt > 0.0:
-		var a := _hurt * 0.45
-		var edge := w * 0.12
-		_canvas.draw_rect(Rect2(0, 0, edge, h), Color(0.8, 0.05, 0.02, a))
-		_canvas.draw_rect(Rect2(w - edge, 0, edge, h), Color(0.8, 0.05, 0.02, a))
-		_canvas.draw_rect(Rect2(0, 0, w, edge * 0.6), Color(0.8, 0.05, 0.02, a * 0.7))
-		_canvas.draw_rect(Rect2(0, h - edge * 0.6, w, edge * 0.6), Color(0.8, 0.05, 0.02, a * 0.7))
+		_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false, Color(1.0, 0.1, 0.05, _hurt))
 
-	# Путь забега: точки комнат, текущая крупнее
-	var n: int = game.rooms.size()
-	var step := 22.0
-	var px0 := w * 0.5 - step * (n - 1) * 0.5
-	for i in n:
-		var kind: String = game.rooms[i].kind
-		var pc: Color = PIP_COLORS[kind]
-		if i > game.room_index:
-			pc.a = 0.35
-		var r := 6.5 if i == game.room_index else 4.0
-		_canvas.draw_circle(Vector2(px0 + i * step, 18), r + 1.5, Color(0, 0, 0, 0.6))
-		_canvas.draw_circle(Vector2(px0 + i * step, 18), r, pc)
+	if not cinematic and game.state != "victory":
+		_draw_path(w)
+		_draw_purse(w)
+		if enemy != null and enemy.state != Enemy.State.DEAD:
+			_draw_enemy_panel(enemy, w)
+			if enemy.state == Enemy.State.WINDUP:
+				_draw_threat(enemy, w, h)
+		_draw_popups()
+		_draw_message(w, h)
+		_draw_player(w, h, enemy)
 
-	# Враг: имя, здоровье, стойкость
-	if enemy != null and enemy.state != Enemy.State.DEAD:
-		var bw := w * 0.7
-		var x0 := (w - bw) * 0.5
-		_text("%s   %d/%d" % [enemy.display_name, game.wave_index + 1, game.wave.size()],
-			Vector2(w * 0.5, 46), 20, Color(0.92, 0.88, 0.82))
-		_bar(Rect2(x0, 58, bw, 14), enemy.hp / enemy.max_hp, Color(0.78, 0.12, 0.1))
-		_bar(Rect2(x0, 76, bw, 7), enemy.stagger / enemy.stagger_max, Color(1.0, 0.8, 0.25))
-		if enemy.state == Enemy.State.WINDUP:
-			_draw_threat(enemy, w, h)
-
-	# Всплывающие цифры
-	for pp in _popups:
-		var t: float = pp.t
-		var c: Color = pp.color
-		c.a = 1.0 - t / 0.9
-		var big: bool = pp.big
-		_text(pp.text, pp.pos + Vector2(0, -70.0 * t), 34 if big else 24, c)
-
-	# Сообщение по центру
-	if _msg_t > 0.0:
-		var c := _msg_color
-		c.a = clampf(_msg_t / minf(0.3, _msg_dur), 0.0, 1.0)
-		_text(_msg, Vector2(w * 0.5, h * 0.36), 30, c)
-
-	# Зона жестов: еле заметная граница
-	var zone_y := h * 0.55
-	_canvas.draw_line(Vector2(w * 0.1, zone_y), Vector2(w * 0.9, zone_y), Color(1, 1, 1, 0.07), 2.0)
-
-	# Подсказка
-	_text(_hint(enemy), Vector2(w * 0.5, h - 118), 16, Color(0.8, 0.8, 0.85, 0.75))
-
-	# Игрок: здоровье и стойкость
-	var pw := w * 0.8
-	var px := (w - pw) * 0.5
-	_bar(Rect2(px, h - 92, pw, 16), game.hp / game.max_hp, Color(0.25, 0.75, 0.35))
-	_bar(Rect2(px, h - 70, pw, 9), game.stamina / game.max_stamina, Color(0.35, 0.65, 1.0))
-	_text("Осколки: %d    Золото: %d" % [game.shards, game.gold], Vector2(w * 0.5, h - 14), 14, Color(0.9, 0.82, 0.6, 0.9))
-	if game.block_t > 0.0:
-		_text("ЩИТ", Vector2(w * 0.5, h - 38), 18, Color(0.75, 0.85, 1.0))
-	elif game.charging:
-		var k := clampf(game.charge_t / float(game.p.charge_time), 0.0, 1.0)
-		_bar(Rect2(w * 0.3, h - 46, w * 0.4, 8), k, Color(1.0, 0.6, 0.2) if k < 1.0 else Color(1.0, 0.95, 0.5))
+	# Заставка босса: чёрные полосы и имя
+	if _boss_card > 0.01 and enemy != null:
+		_letterbox(w, h, _boss_card)
+		_ornament(Vector2(w * 0.5, h * 0.63), w * 0.6, Color(GOLD, _boss_card))
+		_text(enemy.display_name.to_upper(), Vector2(w * 0.5, h * 0.68), 38, Color(1.0, 0.3, 0.25, _boss_card))
+		_text("Страж Пепельной Короны", Vector2(w * 0.5, h * 0.72), 18, Color(PARCHMENT, _boss_card * 0.85))
 
 	# Затемнение при переходе между комнатами
 	if game.fade > 0.0:
-		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, game.fade))
-		if game.state == "walk" and game.room_index < n:
-			var fc := Color(0.85, 0.82, 0.75, game.fade)
-			_text("Комната %d из %d" % [game.room_index + 1, n], Vector2(w * 0.5, h * 0.45), 26, fc)
+		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.01, 0.03, game.fade))
+		if game.state == "walk" and game.room_index < game.rooms.size():
+			var kind: String = game.room.kind
+			_ornament(Vector2(w * 0.5, h * 0.42), w * 0.45, Color(GOLD, game.fade))
+			_text(str(game.KIND_NAMES[kind]), Vector2(w * 0.5, h * 0.47), 30, Color(PARCHMENT, game.fade))
+			_text("Комната %d из %d" % [game.room_index + 1, game.rooms.size()], Vector2(w * 0.5, h * 0.51), 17,
+				Color(GOLD, game.fade * 0.9))
 
-	# Итог
+	if game.state == "cutscene" or (game.state == "victory" and game.cut_t > 0.0):
+		_draw_cutscene(w, h)
 	if game.state == "victory" or game.state == "defeat":
-		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.55))
-		var ok: bool = game.state == "victory"
-		_text("Забег пройден" if ok else "Страж пал", Vector2(w * 0.5, h * 0.4), 36,
-			Color(1.0, 0.85, 0.4) if ok else Color(1.0, 0.35, 0.3))
-		var s: Dictionary = game.stats
-		_text("Точных ударов: %d   Парирований: %d" % [s.weak_hits, s.parries], Vector2(w * 0.5, h * 0.47), 18, Color.WHITE)
-		_text("Блоков: %d   Уклонений: %d   Получено урона: %d" % [s.blocks, s.dodges, roundi(s.taken)],
-			Vector2(w * 0.5, h * 0.51), 18, Color.WHITE)
-		_text("Комнат: %d из %d   Осколки: %d   Золото: %d" % [s.rooms, n, game.shards, game.gold],
-			Vector2(w * 0.5, h * 0.55), 18, Color(1.0, 0.88, 0.6))
-		_text("Сид забега: %d" % game.run_seed, Vector2(w * 0.5, h * 0.67), 14, Color(0.7, 0.7, 0.75))
-		_text("Тап — заново", Vector2(w * 0.5, h * 0.62), 22, Color(0.85, 0.85, 0.9, 0.6 + 0.4 * sin(_time * 4.0)))
+		_draw_result(w, h)
 
 
-## Стрелка у края экрана со стороны удара. В окне парирования — белая и крупнее.
+# ============================================================ части интерфейса
+
+## Путь забега: линия и ромбы комнат; пройденные яркие, текущая крупнее и пульсирует.
+func _draw_path(w: float) -> void:
+	var n: int = game.rooms.size()
+	var step := minf(30.0, (w - 180.0) / maxf(1.0, n - 1))
+	var x0 := w * 0.5 - step * (n - 1) * 0.5
+	var y := 24.0
+	_canvas.draw_line(Vector2(x0, y), Vector2(x0 + step * (n - 1), y), Color(GOLD_DARK, 0.9), 2.0)
+	if game.room_index > 0:
+		_canvas.draw_line(Vector2(x0, y), Vector2(x0 + step * mini(game.room_index, n - 1), y), GOLD, 2.0)
+	for i in n:
+		var kind: String = game.rooms[i].kind
+		var c: Color = PIP_COLORS[kind]
+		var r := 6.0
+		if kind == "boss":
+			r = 8.0
+		if i == game.room_index:
+			r += 2.5 + sin(_time * 5.0) * 1.0
+		elif i > game.room_index:
+			c = c.darkened(0.55)
+		var p := Vector2(x0 + i * step, y)
+		_diamond(p, r + 2.5, GOLD if i <= game.room_index else GOLD_DARK)
+		_diamond(p, r + 1.0, INK)
+		_diamond(p, r - 0.5, c)
+
+
+## Кошель: осколки слева, золото справа от пути.
+func _draw_purse(w: float) -> void:
+	_chip(Rect2(10, 12, 62, 24))
+	_diamond(Vector2(24, 24), 6.5, Color(0.55, 0.85, 1.0))
+	_diamond(Vector2(24, 24), 3.0, Color(0.9, 0.97, 1.0))
+	_text_left(str(game.shards), Vector2(36, 30), 16, PARCHMENT)
+	_chip(Rect2(w - 72, 12, 62, 24))
+	_canvas.draw_circle(Vector2(w - 58, 24), 6.5, GOLD)
+	_canvas.draw_circle(Vector2(w - 58, 24), 4.0, Color(1.0, 0.9, 0.55))
+	_text_left(str(game.gold), Vector2(w - 46, 30), 16, PARCHMENT)
+
+
+func _draw_enemy_panel(enemy: Enemy, w: float) -> void:
+	var bw := w * (0.84 if enemy.is_boss else 0.7)
+	var x0 := (w - bw) * 0.5
+	var y := 72.0
+	var bh := 18.0 if enemy.is_boss else 14.0
+	_text(enemy.display_name, Vector2(w * 0.5, y - 8), 19, Color(1.0, 0.45, 0.4) if enemy.is_boss else PARCHMENT)
+	if game.wave.size() > 1:
+		_text_left("%d/%d" % [game.wave_index + 1, game.wave.size()], Vector2(x0 + bw + 8, y + 12), 13, Color(GOLD, 0.9))
+	_fancy_bar(Rect2(x0, y, bw, bh), enemy.hp / enemy.max_hp, _enemy_trail, HP_RED)
+	# Деления фаз босса
+	var phases: Array = enemy.data.get("phases", [])
+	for ph: Dictionary in phases:
+		var px := x0 + bw * float(ph.hp)
+		_canvas.draw_line(Vector2(px, y - 2), Vector2(px, y + bh + 2), GOLD, 2.0)
+	# Стойкость: тонкая полоса под здоровьем, при оглушении мигает
+	var sy := y + bh + 7.0
+	var sc := GOLD
+	if enemy.state == Enemy.State.STUNNED:
+		sc = Color(1.0, 0.95, 0.6).lerp(GOLD, 0.5 + 0.5 * sin(_time * 14.0))
+	_canvas.draw_rect(Rect2(x0 + bw * 0.1 - 1, sy - 1, bw * 0.8 + 2, 7), Color(INK, 0.85))
+	_canvas.draw_rect(Rect2(x0 + bw * 0.1, sy, bw * 0.8 * clampf(enemy.stagger / enemy.stagger_max, 0.0, 1.0), 5), sc)
+
+
+func _draw_popups() -> void:
+	for pp in _popups:
+		var t: float = pp.t
+		var c: Color = pp.color
+		c.a = 1.0 - smoothstep(0.5, 0.9, t)
+		var big: bool = pp.big
+		# Цифра «выстреливает» крупной и оседает
+		var pop := 1.0 + 0.7 * (1.0 - smoothstep(0.0, 0.18, t))
+		var fsize := int((40 if big else 27) * pop)
+		_text(pp.text, pp.pos + Vector2(0, -80.0 * (1.0 - pow(1.0 - t / 0.9, 2.0))), fsize, c)
+
+
+func _draw_message(w: float, h: float) -> void:
+	if _msg_t <= 0.0:
+		return
+	var age := _msg_dur - _msg_t
+	var c := _msg_color
+	c.a = clampf(_msg_t / minf(0.3, _msg_dur), 0.0, 1.0)
+	var pop := 1.0 + 0.35 * (1.0 - smoothstep(0.0, 0.15, age))
+	var fsize := int(28 * pop)
+	var lines := _wrap(_msg, fsize, w * 0.84)
+	var y := h * 0.34
+	var tw := 0.0
+	for line in lines:
+		tw = maxf(tw, _font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize).x)
+	var band := Rect2(w * 0.5 - tw * 0.5 - 22, y - fsize - 4, tw + 44, lines.size() * (fsize + 6) + 14)
+	_canvas.draw_style_box(_box_style(Color(INK, 0.55 * c.a), Color(0, 0, 0, 0), 0, 14), band)
+	for line in lines:
+		_text(line, Vector2(w * 0.5, y), fsize, c)
+		y += fsize + 6
+
+
+## Полосы героя: здоровье со значком сердца и числом, стойкость, заряд, подсказка.
+func _draw_player(w: float, h: float, enemy: Enemy) -> void:
+	_text(_hint(enemy), Vector2(w * 0.5, h - 112), 15, Color(PARCHMENT, 0.8))
+
+	var px := 62.0
+	var pw := w - px - 22.0
+	var hy := h - 88.0
+	var low: bool = game.hp / game.max_hp <= 0.3
+	_fancy_bar(Rect2(px, hy, pw, 20), game.hp / game.max_hp, _hp_trail,
+		HP_RED.lerp(Color(1, 0.5, 0.3), 0.5 + 0.5 * sin(_time * 8.0)) if low else HP_GREEN)
+	_text("%d / %d" % [roundi(game.hp), roundi(game.max_hp)], Vector2(px + pw * 0.5, hy + 16), 14, Color.WHITE)
+	# Медальон-сердце слева
+	var hc := Vector2(34, hy + 12)
+	_canvas.draw_circle(hc, 22, GOLD_DARK)
+	_canvas.draw_circle(hc, 20, GOLD)
+	_canvas.draw_circle(hc, 17, INK)
+	_heart(hc + Vector2(0, 1), 10.0 + (1.2 * sin(_time * 8.0) if low else 0.0), HP_RED)
+
+	_fancy_bar(Rect2(px, hy + 30.0, pw * 0.72, 10), game.stamina / game.max_stamina, 0.0, STAMINA)
+
+	if game.block_t > 0.0:
+		_chip(Rect2(w * 0.5 - 42, h - 40, 84, 26))
+		_text("ЩИТ", Vector2(w * 0.5, h - 21), 16, Color(0.8, 0.9, 1.0))
+	elif game.charging:
+		var k := clampf(game.charge_t / float(game.p.charge_time), 0.0, 1.0)
+		_fancy_bar(Rect2(w * 0.25, h - 34, w * 0.5, 10), k, 0.0, Color(1.0, 0.6, 0.2) if k < 1.0 else Color(1.0, 0.95, 0.5))
+
+
+## Стрелка у края экрана со стороны удара. В окне парирования — белая, крупная, со свечением.
 func _draw_threat(enemy: Enemy, w: float, h: float) -> void:
 	var in_window: bool = enemy.time_to_impact() <= float(game.p.parry_window)
-	var c := Color(1.0, 0.95, 0.85, 0.95) if in_window else Color(1.0, 0.15, 0.08, 0.55 + 0.35 * sin(_time * 18.0))
-	var s := 46.0 if in_window else 34.0
-	var pts := PackedVector2Array()
+	var c := Color(1.0, 0.97, 0.88, 0.98) if in_window else Color(1.0, 0.18, 0.1, 0.6 + 0.35 * sin(_time * 18.0))
+	var s := 46.0 if in_window else 32.0
+	var center := Vector2(w * 0.5, 150)
+	var dir := Vector2(0, -1)
 	match enemy.attack_side:
 		Enemy.Side.LEFT:
-			var c0 := Vector2(26, h * 0.4)
-			pts = PackedVector2Array([c0 + Vector2(-s * 0.4, 0), c0 + Vector2(s * 0.6, -s), c0 + Vector2(s * 0.6, s)])
+			center = Vector2(34, h * 0.4)
+			dir = Vector2(-1, 0)
 		Enemy.Side.RIGHT:
-			var c1 := Vector2(w - 26, h * 0.4)
-			pts = PackedVector2Array([c1 + Vector2(s * 0.4, 0), c1 + Vector2(-s * 0.6, -s), c1 + Vector2(-s * 0.6, s)])
-		_:
-			var c2 := Vector2(w * 0.5, 112)
-			pts = PackedVector2Array([c2 + Vector2(0, -s * 0.4), c2 + Vector2(-s, s * 0.6), c2 + Vector2(s, s * 0.6)])
-	_canvas.draw_colored_polygon(pts, c)
+			center = Vector2(w - 34, h * 0.4)
+			dir = Vector2(1, 0)
+	var side := Vector2(-dir.y, dir.x)
+	# Два шеврона: мягкое свечение и чёткая стрелка
+	for pass_i in 2:
+		var ss := s + (10.0 if pass_i == 0 else 0.0)
+		var col := Color(c, c.a * 0.25) if pass_i == 0 else c
+		_canvas.draw_colored_polygon(PackedVector2Array([
+			center + dir * ss * 0.5, center - dir * ss * 0.5 + side * ss,
+			center - dir * ss * 0.1, center - dir * ss * 0.5 - side * ss]), col)
 
 
 func _hint(enemy: Enemy) -> String:
 	if game.state == "room":
 		return "Тап — " + str(ROOM_HINTS[game.room.kind])
-	if enemy == null or game.state != "fight":
+	if enemy == null or game.state != "fight" or enemy.state == Enemy.State.APPEAR:
 		return ""
 	if enemy.state == Enemy.State.WINDUP:
-		return "Удар %s! Свайп навстречу при вспышке · вниз — щит · двойной — уклон" % game.SIDE_NAMES[enemy.attack_side]
+		return "Удар %s! Свайп навстречу при вспышке" % game.SIDE_NAMES[enemy.attack_side]
 	if enemy.state == Enemy.State.STUNNED:
 		return "Удержи палец и отпусти — заряженный удар"
 	return "Свайп к жёлтой метке — точный удар"
 
 
-func _bar(r: Rect2, k: float, c: Color) -> void:
-	_canvas.draw_rect(r.grow(2.0), Color(0, 0, 0, 0.6))
-	_canvas.draw_rect(r, Color(0.12, 0.12, 0.14, 0.9))
-	var f := r
-	f.size.x *= clampf(k, 0.0, 1.0)
-	_canvas.draw_rect(f, c)
+## Кат-сцена победы над боссом: чёрные полосы, строки истории по очереди, белая заря.
+func _draw_cutscene(w: float, h: float) -> void:
+	var t: float = game.cut_t
+	if game.state == "cutscene":
+		_letterbox(w, h, smoothstep(0.0, 0.8, t))
+		var lines: Array = game.run_cfg.get("cutscene", [])
+		var slot: float = (game.CUT_TIME - 2.4) / maxf(1.0, lines.size())
+		for i in lines.size():
+			var lt := t - 0.6 - i * slot
+			var a := smoothstep(0.0, 0.6, lt) * (1.0 - smoothstep(slot - 0.5, slot, lt))
+			if a <= 0.0:
+				continue
+			var y := h * 0.925
+			for line in _wrap(str(lines[i]), 19, w * 0.9):
+				_text(line, Vector2(w * 0.5, y), 19, Color(PARCHMENT, a))
+				y += 28
+	if game.white > 0.0:
+		var a: float = game.white if game.state == "cutscene" else maxf(0.0, 1.0 - _result_t * 1.2)
+		_canvas.draw_rect(Rect2(0, 0, w, h), Color(1.0, 0.95, 0.82, a))
+
+
+## Экран итога: тёмная панель с золотой рамкой, звёзды, строки статистики.
+func _draw_result(w: float, h: float) -> void:
+	var a := smoothstep(0.0, 0.5, _result_t)
+	var ok: bool = game.state == "victory"
+	_canvas.draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.01, 0.04, 0.6 * a))
+	var slide := (1.0 - smoothstep(0.0, 0.45, _result_t)) * 60.0
+	var panel := Rect2(w * 0.07, h * 0.22 + slide, w * 0.86, 430)
+	_canvas.draw_style_box(_box_style(Color(0.12, 0.09, 0.13, 0.96 * a), Color(GOLD, a), 3, 18), panel)
+	_canvas.draw_style_box(_box_style(Color(0, 0, 0, 0), Color(GOLD_DARK, a), 1, 13), panel.grow(-8))
+	var cx := w * 0.5
+	var y := panel.position.y + 62
+	_text("ПОБЕДА" if ok else "СТРАЖ ПАЛ", Vector2(cx, y), 40, Color(GOLD if ok else HP_RED, a))
+	_ornament(Vector2(cx, y + 20), panel.size.x * 0.6, Color(GOLD, a))
+	var s: Dictionary = game.stats
+
+	# Звёзды: за победу, за мало полученного урона, за парирования
+	var stars := 0
+	if ok:
+		stars = 1 + int(float(s.taken) < 40.0) + int(int(s.parries) >= 5)
+	y += 70
+	for i in 3:
+		var appear := smoothstep(0.5 + i * 0.25, 0.75 + i * 0.25, _result_t)
+		var lit := i < stars
+		var r := 20.0 * (1.0 + 0.5 * (1.0 - appear)) if lit else 18.0
+		var sp := Vector2(cx + (i - 1) * 62.0, y)
+		_star(sp, r + 3.0, Color(GOLD_DARK, a))
+		_star(sp, r, Color(GOLD, a * appear) if lit else Color(0.2, 0.17, 0.2, a))
+
+	y += 62
+	var rows := [
+		["Комнат пройдено", "%d из %d" % [s.rooms, game.rooms.size()]],
+		["Точных ударов", str(s.weak_hits)],
+		["Парирований", str(s.parries)],
+		["Блоков и уклонений", str(int(s.blocks) + int(s.dodges))],
+		["Получено урона", str(roundi(s.taken))],
+		["Осколки / золото", "%d / %d" % [game.shards, game.gold]],
+	]
+	for i in rows.size():
+		var ra := a * smoothstep(0.6 + i * 0.1, 0.9 + i * 0.1, _result_t)
+		_text_left(str(rows[i][0]), Vector2(panel.position.x + 34, y), 17, Color(PARCHMENT, ra * 0.85))
+		_text_right(str(rows[i][1]), Vector2(panel.end.x - 34, y), 17, Color(GOLD, ra))
+		y += 30
+	_text("Сид забега: %d" % game.run_seed, Vector2(cx, panel.end.y - 18), 12, Color(PARCHMENT, 0.45 * a))
+	if _result_t > 1.6:
+		_text("Тап — новый забег", Vector2(cx, panel.end.y + 44), 21, Color(PARCHMENT, 0.6 + 0.4 * sin(_time * 4.0)))
+
+
+# ============================================================ примитивы
+
+func _letterbox(w: float, h: float, k: float) -> void:
+	var bar := h * 0.12 * k
+	_canvas.draw_rect(Rect2(0, 0, w, bar), Color.BLACK)
+	_canvas.draw_rect(Rect2(0, h - bar, w, bar), Color.BLACK)
+
+
+## Полоса с тёмной рамкой, золотым кантом, «следом» урона и бликом сверху.
+func _fancy_bar(r: Rect2, k: float, trail: float, c: Color) -> void:
+	var radius := int(r.size.y * 0.5)
+	_canvas.draw_style_box(_box_style(INK, GOLD_DARK, 2, radius + 3), r.grow(3.0))
+	_canvas.draw_style_box(_box_style(Color(0.16, 0.13, 0.17), Color(0, 0, 0, 0), 0, radius), r)
+	k = clampf(k, 0.0, 1.0)
+	if trail > k:
+		var tr := r
+		tr.size.x = maxf(r.size.y, r.size.x * clampf(trail, 0.0, 1.0))
+		_canvas.draw_style_box(_box_style(Color(1.0, 0.95, 0.85, 0.85), Color(0, 0, 0, 0), 0, radius), tr)
+	if k > 0.0:
+		var f := r
+		f.size.x = maxf(r.size.y, r.size.x * k)
+		_canvas.draw_style_box(_box_style(c, Color(0, 0, 0, 0), 0, radius), f)
+		var hl := Rect2(f.position + Vector2(5, 2), Vector2(maxf(0.0, f.size.x - 10), f.size.y * 0.3))
+		_canvas.draw_style_box(_box_style(Color(1, 1, 1, 0.28), Color(0, 0, 0, 0), 0, 4), hl)
+
+
+func _chip(r: Rect2) -> void:
+	_canvas.draw_style_box(_box_style(Color(INK, 0.8), GOLD_DARK, 1, 12), r)
+
+
+func _box_style(bg: Color, border: Color, border_w: int, radius: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(border_w)
+	sb.set_corner_radius_all(radius)
+	return sb
+
+
+func _diamond(c: Vector2, r: float, col: Color) -> void:
+	_canvas.draw_colored_polygon(PackedVector2Array([
+		c + Vector2(0, -r), c + Vector2(r, 0), c + Vector2(0, r), c + Vector2(-r, 0)]), col)
+
+
+## Орнамент-разделитель: линия с ромбами.
+func _ornament(c: Vector2, width: float, col: Color) -> void:
+	_canvas.draw_line(c - Vector2(width * 0.5, 0), c - Vector2(12, 0), col, 1.5)
+	_canvas.draw_line(c + Vector2(12, 0), c + Vector2(width * 0.5, 0), col, 1.5)
+	_diamond(c, 6.0, col)
+	_diamond(c - Vector2(width * 0.5, 0), 3.0, col)
+	_diamond(c + Vector2(width * 0.5, 0), 3.0, col)
+
+
+func _heart(c: Vector2, r: float, col: Color) -> void:
+	_canvas.draw_circle(c + Vector2(-r * 0.45, -r * 0.25), r * 0.52, col)
+	_canvas.draw_circle(c + Vector2(r * 0.45, -r * 0.25), r * 0.52, col)
+	_canvas.draw_colored_polygon(PackedVector2Array([
+		c + Vector2(-r * 0.93, 0), c + Vector2(r * 0.93, 0), c + Vector2(0, r * 0.95)]), col)
+
+
+func _star(c: Vector2, r: float, col: Color) -> void:
+	if col.a <= 0.0:
+		return
+	# Пять треугольников-лучей и пятиугольник в центре: невыпуклую звезду рисуем по частям
+	var inner := PackedVector2Array()
+	for i in 5:
+		var a0 := -PI / 2.0 + i * TAU / 5.0
+		var left := c + Vector2(cos(a0 - PI / 5.0), sin(a0 - PI / 5.0)) * r * 0.45
+		var right := c + Vector2(cos(a0 + PI / 5.0), sin(a0 + PI / 5.0)) * r * 0.45
+		inner.append(right)
+		_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(cos(a0), sin(a0)) * r, right, left]), col)
+	_canvas.draw_colored_polygon(inner, col)
 
 
 func _text(t: String, center: Vector2, fsize: int, c: Color) -> void:
 	var tw := _font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize).x
-	var pos := center - Vector2(tw * 0.5, 0)
-	_canvas.draw_string_outline(_font, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, 4, Color(0, 0, 0, c.a * 0.8))
+	_text_left(t, center - Vector2(tw * 0.5, 0), fsize, c)
+
+
+func _text_right(t: String, right: Vector2, fsize: int, c: Color) -> void:
+	var tw := _font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize).x
+	_text_left(t, right - Vector2(tw, 0), fsize, c)
+
+
+## Текст с мягкой тенью и тонкой обводкой: читается на любом фоне.
+func _text_left(t: String, pos: Vector2, fsize: int, c: Color) -> void:
+	if c.a <= 0.0 or t == "":
+		return
+	_canvas.draw_string(_font, pos + Vector2(0, 2), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, Color(0, 0, 0, c.a * 0.5))
+	_canvas.draw_string_outline(_font, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, maxi(2, fsize / 8), Color(INK, c.a * 0.9))
 	_canvas.draw_string(_font, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, c)
+
+
+## Перенос длинной строки по словам под ширину экрана.
+func _wrap(t: String, fsize: int, max_w: float) -> PackedStringArray:
+	var out := PackedStringArray()
+	var line := ""
+	for word in t.split(" "):
+		var probe := word if line == "" else line + " " + word
+		if line != "" and _font.get_string_size(probe, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize).x > max_w:
+			out.append(line)
+			line = word
+		else:
+			line = probe
+	if line != "":
+		out.append(line)
+	return out
+
+
+func _radial(inner: Color, outer: Color) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.set_color(0, inner)
+	g.set_color(1, outer)
+	g.set_offset(0, 0.45)
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 1.0)
+	t.width = 128
+	t.height = 128
+	return t
+
+
+func _linear(from: Color, to: Color) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.set_color(0, from)
+	g.set_color(1, to)
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.fill_from = Vector2(0, 0)
+	t.fill_to = Vector2(0, 1)
+	t.width = 8
+	t.height = 64
+	return t

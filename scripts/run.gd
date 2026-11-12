@@ -1,6 +1,7 @@
 ## Генератор забега: по сиду собирает список комнат из data/run.json.
 ## Правила: первая и последняя комнаты — бой (последняя — усиленный),
 ## в середине обязательно встречаются сундук, алтарь и событие, остальное — бои.
+## Если в данных задан босс, он всегда идёт последней комнатой.
 ## Один и тот же сид всегда даёт один и тот же забег.
 extends RefCounted
 
@@ -42,4 +43,6 @@ static func generate(cfg: Dictionary, seed_value: int) -> Array:
 				var events: Array = cfg.events
 				room.event = events[rng.randi_range(0, events.size() - 1)]
 		rooms.append(room)
+	if cfg.has("boss"):
+		rooms.append({"kind": "boss", "index": length, "wave": [cfg.boss]})
 	return rooms

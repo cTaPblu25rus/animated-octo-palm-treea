@@ -81,10 +81,50 @@
 				"top"
 			],
 			"eyes": "#ff2a2a",
-			"scale": 1.2,
+			"scale": 1.0,
 			"guard_hits": 3,
 			"model": "warrior",
-			"weapon": "axe"
+			"weapon": "blade",
+			"distance": 2.7
+		},
+		"faceless_knight": {
+			"name": "Рыцарь Без Лица",
+			"boss": true,
+			"hp": 300,
+			"damage": 20,
+			"windup": 0.9,
+			"idle_min": 0.9,
+			"idle_max": 1.5,
+			"recover": 0.7,
+			"stagger_max": 170,
+			"stun_time": 1.8,
+			"sides": [
+				"left",
+				"right",
+				"top"
+			],
+			"eyes": "#ff1030",
+			"scale": 1.45,
+			"guard_hits": 3,
+			"model": "warrior",
+			"weapon": "axe",
+			"distance": 3.1,
+			"appear_time": 3.0,
+			"appear_anim": "Spawn_Ground_Skeletons",
+			"phases": [
+				{
+					"hp": 0.66,
+					"windup": 0.8,
+					"combo": 2,
+					"title": "Рыцарь впадает в ярость!"
+				},
+				{
+					"hp": 0.33,
+					"windup": 0.7,
+					"combo": 3,
+					"title": "Последний рубеж!"
+				}
+			]
 		}
 	}
 }
