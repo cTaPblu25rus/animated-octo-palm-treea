@@ -1,0 +1,11 @@
+Значки с game-icons.net, лицензия CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
+Авторы: Lorc, Delapouite, Carl Olsen, Zeromancer.
+Растеризованы в PNG 128×128, белые на прозрачном фоне; в игре окрашиваются цветом.
+
+burn — flame (Carl Olsen) · thorns — thorny-vine (Lorc) · fury — enrage (Delapouite)
+leech — bleeding-heart (Lorc) · swift — wingfoot (Lorc) · bulwark — checked-shield (Lorc)
+executioner — decapitation (Lorc) · lucky — clover (Lorc) · momentum — progression (Delapouite)
+second_wind — angel-wings (Lorc) · fight — crossed-swords (Lorc) · elite — crowned-skull (Lorc)
+shop — two-coins (Delapouite) · chest — chest (Delapouite) · altar — sunbeams (Lorc)
+event — uncertainty (Lorc) · boss — daemon-skull (Lorc) · heal — heart-plus (Zeromancer)
+weapon — broadsword (Lorc) · leave — exit-door (Delapouite) · gem — crystal-shine (Lorc)

@@ -27,7 +27,15 @@ var _forge_buttons := {}
 var _choice: PanelContainer
 var _choice_box: VBoxContainer
 var choice_kind := ""
-var choice_options: Array = []     # [{title, text, color, tag, enabled}]
+var choice_options: Array = []     # [{title, text, color, tag, enabled, icon}]
+var _cards: Array[Button] = []
+var _picking := false
+var _stage: Control
+var _preview: Node3D
+var _loot_color := Color.WHITE
+var _loot_rarity := 0
+var _loot_t := 0.0
+var _flash := 0.0
 
 
 func _ready() -> void:
@@ -62,35 +70,183 @@ func show_loot(weapon: Dictionary) -> void:
 	var cur: Dictionary = Save.data.weapon
 	_clear(_loot_box)
 	var col := Items.color(cfg, weapon)
+	var rarity := int(weapon.rarity)
+	_loot_color = col
+	_loot_rarity = rarity
+	_loot_t = 0.0
+	var seq: Array = []      # [узел, задержка появления]
+
 	_loot_box.add_child(_label("ДОБЫЧА", 30, GOLD, true))
-	_loot_box.add_child(_label(Items.title(cfg, weapon), 26, col, true))
-	_loot_box.add_child(_label(str(cfg.rarities[int(weapon.rarity)].name), 16, Color(col, 0.85), true))
-	_loot_box.add_child(_label(str(cfg.weapons[weapon.id].note), 15, Color(PARCHMENT, 0.75), true))
+	# Сцена: лучи цвета редкости и вращающаяся модель оружия
+	_stage = Control.new()
+	_stage.custom_minimum_size = Vector2(412, 230)
+	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stage.draw.connect(_draw_stage)
+	_loot_box.add_child(_stage)
+	_build_preview(cfg.weapons[weapon.id])
+
+	var name_l := _label(Items.title(cfg, weapon), 27, col, true)
+	_loot_box.add_child(name_l)
+	seq.append([name_l, 0.55])
+	var pill := _label(str(cfg.rarities[rarity].name).to_upper(), 15, INK, true)
+	pill.custom_minimum_size = Vector2(170, 0)
+	var pill_box := PanelContainer.new()
+	pill_box.add_theme_stylebox_override("panel", _box(col, Color(1, 1, 1, 0.5), 1, 12))
+	pill_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	pill_box.add_child(pill)
+	_loot_box.add_child(pill_box)
+	seq.append([pill_box, 0.7])
+	var note := _label(str(cfg.weapons[weapon.id].note), 15, Color(PARCHMENT, 0.75), true)
+	_loot_box.add_child(note)
+	seq.append([note, 0.8])
+	var delay := 0.95
 	for row: Array in Items.compare(cfg, weapon, cur):
 		var d: int = row[2]
 		var arrow := "" if d == 0 else ("  ▲" if d > 0 else "  ▼")
-		_loot_box.add_child(_row(str(row[0]), str(row[1]) + arrow, PARCHMENT if d == 0 else (GOOD if d > 0 else BAD)))
+		var r := _row(str(row[0]), str(row[1]) + arrow, PARCHMENT if d == 0 else (GOOD if d > 0 else BAD))
+		_loot_box.add_child(r)
+		seq.append([r, delay])
+		delay += 0.1
 	if str(weapon.affix) != "":
 		var af: Dictionary = cfg.affixes[weapon.affix]
-		_loot_box.add_child(_label("%s: %s" % [af.name, af.text], 16, GOLD, true))
-	_loot_box.add_child(_label("Сейчас: %s (сила %d)" % [Items.title(cfg, cur), Items.power(cfg, cur)], 14,
-		Color(PARCHMENT, 0.6), true))
+		var af_l := _label("✦ %s: %s" % [af.name, af.text], 16, GOLD, true)
+		_loot_box.add_child(af_l)
+		seq.append([af_l, delay])
+		delay += 0.12
+	var cur_l := _label("Сейчас: %s (сила %d)" % [Items.title(cfg, cur), Items.power(cfg, cur)], 14, Color(PARCHMENT, 0.6), true)
+	_loot_box.add_child(cur_l)
+	seq.append([cur_l, delay])
 	var take := _button("Взять", 64)
 	take.add_theme_font_size_override("font_size", 22)
+	take.add_theme_color_override("font_color", col)
+	for st in ["normal", "hover", "pressed", "focus"]:
+		take.add_theme_stylebox_override(st, _box(Color(INK, 0.9), col, 2, 12))
 	take.pressed.connect(choose.bind(true))
 	_loot_box.add_child(take)
+	seq.append([take, delay + 0.15])
 	var scrap := _button("Разобрать: +%d осколков" % Items.salvage(cfg, weapon), 54)
 	scrap.pressed.connect(choose.bind(false))
 	_loot_box.add_child(scrap)
+	seq.append([scrap, delay + 0.25])
+
+	# Строки появляются по очереди, пока оружие «выпрыгивает» из света
+	for item: Array in seq:
+		var node: Control = item[0]
+		node.modulate.a = 0.0
+		var tw := create_tween()
+		tw.tween_property(node, "modulate:a", 1.0, 0.22).set_delay(float(item[1]))
 	_loot.visible = true
 	_dim.visible = true
+	_flash = 0.5 + 0.15 * rarity
 	game.gestures.enabled = false
 	_fit(_loot)
+	if rarity >= 1:
+		game.sfx.play("parry", -8.0 + 2.0 * rarity, 1.4 - 0.12 * rarity)
+
+
+## Сцена предпросмотра: отдельный 3D-мир с моделью оружия, камерой и светом.
+func _build_preview(base: Dictionary) -> void:
+	var holder := SubViewportContainer.new()
+	holder.stretch = true
+	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stage.add_child(holder)
+	var vp := SubViewport.new()
+	vp.own_world_3d = true
+	vp.transparent_bg = true
+	vp.msaa_3d = Viewport.MSAA_2X
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	holder.add_child(vp)
+	var env := WorldEnvironment.new()
+	var e := Environment.new()
+	e.background_mode = Environment.BG_CLEAR_COLOR
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(1, 1, 1)
+	e.ambient_light_energy = 0.75
+	env.environment = e
+	vp.add_child(env)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-35, 30, 0)
+	sun.light_energy = 1.3
+	vp.add_child(sun)
+	var cam := Camera3D.new()
+	cam.position = Vector3(0, 0, 3.4)
+	cam.fov = 34.0
+	vp.add_child(cam)
+	_preview = Node3D.new()
+	_preview.rotation.z = -0.45
+	_preview.scale = Vector3.ZERO
+	vp.add_child(_preview)
+	var scene: PackedScene = load("res://assets/kaykit/hero/%s.gltf" % str(base.model))
+	var model: Node3D = scene.instantiate()
+	var k := float(base.scale) * 3.3
+	model.scale = Vector3.ONE * k
+	model.position = Vector3(0, -0.58 * k, 0)
+	_preview.add_child(model)
+
+
+func _process(delta: float) -> void:
+	_flash = maxf(0.0, _flash - delta * 2.2)
+	if _dim.visible:
+		_dim.color = Color(0.02, 0.01, 0.04, 0.6).lerp(Color(_loot_color, 0.75), _flash if _loot.visible else 0.0)
+	if not _loot.visible or _stage == null:
+		return
+	_loot_t += delta
+	if _preview != null:
+		# Оружие «выпрыгивает» с перелётом и раскручивается, потом вращается спокойно
+		var k := clampf((_loot_t - 0.25) / 0.45, 0.0, 1.0)
+		var back := 1.0 + 2.70158 * pow(k - 1.0, 3.0) + 1.70158 * pow(k - 1.0, 2.0)
+		_preview.scale = Vector3.ONE * maxf(0.001, back)
+		_preview.rotation.y += delta * (1.3 + 14.0 * exp(-_loot_t * 2.6))
+		_preview.position.y = sin(_loot_t * 2.0) * 0.05
+	_stage.queue_redraw()
+
+
+## Лучи, свечение и искры за оружием: цвет и число лучей зависят от редкости.
+func _draw_stage() -> void:
+	var c := _stage.size * 0.5
+	var t := _loot_t
+	var grow := 1.0 - pow(1.0 - clampf(t / 0.5, 0.0, 1.0), 3.0)
+	if grow <= 0.01:
+		return
+	var rays := 10 + _loot_rarity * 4
+	for set_i in (2 if _loot_rarity >= 2 else 1):
+		var spin := t * (0.35 if set_i == 0 else -0.22)
+		var reach := (210.0 if set_i == 0 else 150.0) * grow
+		for i in rays:
+			var ang := spin + i * TAU / rays
+			var dir := Vector2(cos(ang), sin(ang))
+			var side := dir.orthogonal() * (13.0 if i % 2 == 0 else 7.0)
+			_stage.draw_colored_polygon(PackedVector2Array([c, c + dir * reach + side, c + dir * reach - side]),
+				Color(_loot_color, (0.2 if set_i == 0 else 0.12) * grow))
+	for i in 5:
+		_stage.draw_circle(c, (95.0 - i * 16.0) * grow, Color(_loot_color, 0.07))
+	# Вспышка в момент появления
+	var burst := maxf(0.0, 1.0 - absf(t - 0.3) * 5.0)
+	if burst > 0.0:
+		_stage.draw_circle(c, 120.0 * burst, Color(1, 1, 1, 0.55 * burst))
+	# Искры кружат вокруг
+	for i in 8 + _loot_rarity * 3:
+		var ang := t * (0.6 + 0.07 * i) + i * 2.4
+		var rad := 70.0 + 22.0 * sin(t * 1.3 + i) + (i % 3) * 22.0
+		var sp := c + Vector2(cos(ang) * rad, sin(ang) * rad * 0.75)
+		var tw := 0.5 + 0.5 * sin(t * 6.0 + i * 1.7)
+		var r := (2.0 + 3.0 * tw) * grow
+		_stage.draw_colored_polygon(PackedVector2Array([
+			sp + Vector2(0, -r * 2.0), sp + Vector2(r, 0), sp + Vector2(0, r * 2.0), sp + Vector2(-r, 0)]),
+			Color(_loot_color.lerp(Color.WHITE, 0.6), 0.9 * tw * grow))
+
+
+func _close_stage() -> void:
+	_clear(_loot_box)
+	_stage = null
+	_preview = null
 
 
 ## Закрыть карточку без выбора (переход из меню разработчика).
 func cancel_loot() -> void:
 	if _loot.visible:
+		_close_stage()
 		_loot.visible = false
 		_dim.visible = _forge.visible
 		game.gestures.enabled = true
@@ -99,6 +255,7 @@ func cancel_loot() -> void:
 func choose(take: bool) -> void:
 	if not _loot.visible:
 		return
+	_close_stage()
 	_loot.visible = false
 	_dim.visible = false
 	game.gestures.enabled = true
@@ -115,27 +272,116 @@ func is_choice_open() -> bool:
 func show_choice(kind: String, title: String, subtitle: String, options: Array) -> void:
 	choice_kind = kind
 	choice_options = options
+	_picking = false
+	_cards.clear()
 	_clear(_choice_box)
 	_choice_box.add_child(_label(title, 28, GOLD, true))
 	if subtitle != "":
 		_choice_box.add_child(_label(subtitle, 15, Color(PARCHMENT, 0.75), true))
 	for i in options.size():
-		var o: Dictionary = options[i]
-		var col: Color = o.get("color", PARCHMENT)
-		var b := _button("%s\n%s" % [o.title, o.text] if str(o.get("text", "")) != "" else str(o.title), 84)
-		b.add_theme_color_override("font_color", col)
-		b.disabled = not bool(o.get("enabled", true))
-		for st in ["normal", "hover", "pressed", "focus"]:
-			b.add_theme_stylebox_override(st, _box(Color(INK, 0.9), Color(col, 0.75), 2, 12))
-		b.pressed.connect(pick.bind(i))
-		_choice_box.add_child(b)
+		var card := _card(options[i], i)
+		_choice_box.add_child(card)
+		_cards.append(card)
+		# Карточки «выезжают» по очереди
+		card.modulate.a = 0.0
+		card.scale = Vector2(0.86, 0.86)
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(card, "modulate:a", 1.0, 0.2).set_delay(0.08 + i * 0.09)
+		tw.tween_property(card, "scale", Vector2.ONE, 0.28).set_delay(0.08 + i * 0.09) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_choice.visible = true
 	_dim.visible = true
 	game.gestures.enabled = false
 	_fit(_choice)
 
 
+## Карточка: значок в цветном круге, название и описание.
+func _card(o: Dictionary, index: int) -> Button:
+	var col: Color = o.get("color", PARCHMENT)
+	var enabled := bool(o.get("enabled", true))
+	var has_text := str(o.get("text", "")) != ""
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(412, 92 if has_text else 70)
+	b.pivot_offset = b.custom_minimum_size * 0.5
+	b.disabled = not enabled
+	for st in ["normal", "hover", "focus"]:
+		b.add_theme_stylebox_override(st, _box(Color(INK, 0.92), Color(col, 0.8), 2, 14))
+	b.add_theme_stylebox_override("pressed", _box(Color(col.darkened(0.7), 0.95), col, 3, 14))
+	b.add_theme_stylebox_override("disabled", _box(Color(INK, 0.5), Color(col, 0.25), 1, 14))
+	b.pressed.connect(_press_card.bind(index))
+
+	var h := HBoxContainer.new()
+	h.set_anchors_preset(Control.PRESET_FULL_RECT)
+	h.offset_left = 12
+	h.offset_right = -12
+	h.add_theme_constant_override("separation", 14)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.modulate.a = 1.0 if enabled else 0.4
+	b.add_child(h)
+
+	var tex := _icon(str(o.get("icon", "")))
+	if tex != null:
+		var badge := PanelContainer.new()
+		badge.custom_minimum_size = Vector2(60, 60)
+		badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var bs := _box(Color(col.darkened(0.72), 1.0), col, 2, 30)
+		bs.set_content_margin_all(9)
+		badge.add_theme_stylebox_override("panel", bs)
+		var tr := TextureRect.new()
+		tr.texture = tex
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.modulate = col.lerp(Color.WHITE, 0.25)
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		badge.add_child(tr)
+		h.add_child(badge)
+
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", 2)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(v)
+	var t := _label(str(o.title), 19, col, tex == null)
+	t.custom_minimum_size = Vector2(0, 0)
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(t)
+	if has_text:
+		var d := _label(str(o.text), 14, Color(PARCHMENT, 0.85), tex == null)
+		d.custom_minimum_size = Vector2(0, 0)
+		d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.add_child(d)
+	return b
+
+
+## Нажатие пальцем: выбранная карточка вспыхивает, остальные гаснут, затем выбор применяется.
+func _press_card(index: int) -> void:
+	if _picking:
+		return
+	_picking = true
+	game.sfx.play("parry", -8.0, 1.3)
+	for i in _cards.size():
+		var card: Button = _cards[i]
+		var tw := create_tween().set_parallel(true)
+		if i == index:
+			tw.tween_property(card, "scale", Vector2(1.06, 1.06), 0.12)
+			tw.tween_property(card, "modulate", Color(1.5, 1.5, 1.5, 1.0), 0.12)
+		else:
+			tw.tween_property(card, "modulate:a", 0.25, 0.15)
+	await get_tree().create_timer(0.24, true, false, true).timeout
+	pick(index)
+
+
+func _icon(icon_name: String) -> Texture2D:
+	var path := "res://assets/icons/%s.png" % icon_name
+	if icon_name == "" or not ResourceLoader.exists(path):
+		return null
+	return load(path)
+
+
 func pick(index: int) -> void:
+	_picking = false
 	if not _choice.visible or index < 0 or index >= choice_options.size():
 		return
 	var o: Dictionary = choice_options[index]
