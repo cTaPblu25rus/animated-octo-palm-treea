@@ -10,6 +10,8 @@
 extends Node
 
 signal gesture(kind: String)
+## Палец нажал на зону-кнопку (умение): жестом это касание не считается.
+signal zone_pressed(index: int)
 
 const ZONE_TOP := 0.55          # доля высоты экрана: жесты принимаются ниже этой линии
 const SWIPE_MIN := 0.07         # минимальная длина свайпа в долях ширины экрана
@@ -19,6 +21,7 @@ const HOLD_SLOP := 0.035        # допустимый сдвиг пальца �
 const DOUBLE_TIME := 0.3        # окно для двойного свайпа
 
 var enabled := true
+var tap_zones: Array[Rect2] = []
 var _active := false
 var _index := -1
 var _start := Vector2.ZERO
@@ -44,6 +47,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
 		if t.pressed and not _active:
+			for i in tap_zones.size():
+				if tap_zones[i].has_point(t.position):
+					zone_pressed.emit(i)
+					return
 			if t.position.y >= _height() * ZONE_TOP:
 				_index = t.index
 				press(t.position)

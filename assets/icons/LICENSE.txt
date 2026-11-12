@@ -9,3 +9,4 @@ second_wind — angel-wings (Lorc) · fight — crossed-swords (Lorc) · elite �
 shop — two-coins (Delapouite) · chest — chest (Delapouite) · altar — sunbeams (Lorc)
 event — uncertainty (Lorc) · boss — daemon-skull (Lorc) · heal — heart-plus (Zeromancer)
 weapon — broadsword (Lorc) · leave — exit-door (Delapouite) · gem — crystal-shine (Lorc)
+whirl — whirlwind (Lorc) · bash — shield-bounces (Lorc) · dawn — sun (Lorc) · tree — tree-branch (Lorc)

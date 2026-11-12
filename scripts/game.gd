@@ -15,6 +15,8 @@ const SettingsMenu := preload("res://scripts/settings_menu.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const MetaUi := preload("res://scripts/meta_ui.gd")
+const Hero := preload("res://scripts/hero.gd")
+const HERO_PATH := "res://data/hero.json"
 const PixelShader := preload("res://shaders/pixel.gdshader")
 const Voice := preload("res://scripts/voice.gd")
 const Title := preload("res://scripts/title.gd")
@@ -94,7 +96,7 @@ var _run_rng := RandomNumberGenerator.new()
 
 ## Счётчики для автоигрока и итогового экрана.
 var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
-	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "crits": 0, "boons": 0, "forks": 0, "bought": 0, "taken": 0.0, "hurt": 0, "kills": 0}
+	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "crits": 0, "boons": 0, "forks": 0, "bought": 0, "skills": 0, "levels": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
 var dev_menu: CanvasLayer
@@ -113,6 +115,10 @@ var _chip_pool: Array[CPUParticles3D] = []
 var _chip_next := 0
 var _hitstop_until := 0          # момент (мс), до которого враг «заморожен»
 var boons_cfg: Dictionary = {}  # data/boons.json
+var hero_cfg: Dictionary = {}   # data/hero.json: уровни, таланты, умения
+var run_xp := 0                 # опыт, набранный за этот забег
+var skill_cd: Array[float] = [0.0, 0.0, 0.0]
+var _room_guard := false        # талант «Несгибаемый»: первый удар в комнате не наносит урона
 var boons: Array[String] = []   # дары этого забега
 var alts: Array = []            # вторая дорога для каждой комнаты (или null)
 var _steps: Array[String] = []  # что ещё показать после комнаты: loot, boon, end
@@ -155,11 +161,16 @@ func _ready() -> void:
 	cfg = _load_json(DATA_PATH)
 	items = _load_json(ITEMS_PATH)
 	boons_cfg = _load_json(BOONS_PATH)
+	hero_cfg = _load_json(HERO_PATH)
 	var testing := autoplay or OS.get_cmdline_user_args().has("--devtest")
 	Save.load_once(testing)
 	shards = int(Save.data.shards)
 	gold = int(Save.data.gold)
 	Save.data.runs = int(Save.data.runs) + 1
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--level="):
+			Save.data.level = int(a.trim_prefix("--level="))
+	_migrate_upgrades()
 	run_cfg = _load_json(RUN_PATH)
 	run_seed = 1 if autoplay else int(_rng.randi() % 1000000)
 	if int(DevMenu.flags().seed) >= 0 and not autoplay:
@@ -191,6 +202,7 @@ func _ready() -> void:
 	gestures = Gestures.new()
 	add_child(gestures)
 	gestures.gesture.connect(on_gesture)
+	gestures.zone_pressed.connect(use_skill)
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
@@ -262,6 +274,7 @@ func _process(delta: float) -> void:
 	_update_hitstop()
 	_update_music()
 	_update_burn(delta)
+	_update_skills(delta)
 	attack_cd = maxf(0.0, attack_cd - delta)
 	block_t = maxf(0.0, block_t - delta)
 	dodge_t = maxf(0.0, dodge_t - delta)
@@ -347,6 +360,8 @@ func _on_phase(index: int, phase_title: String) -> void:
 
 func _on_died() -> void:
 	stats.kills += 1
+	gain_xp(roundi(enemy.max_hp * float(hero_cfg.xp_per_hp)) + (int(hero_cfg.xp_boss) if enemy.is_boss else 0))
+	hp = minf(max_hp, hp + 3.0 * Hero.rank("d4"))
 	if str(Save.data.weapon.affix) == "vampire":
 		hp = minf(max_hp, hp + 6.0)
 	sfx.play("death", -2.0)
@@ -388,6 +403,11 @@ func _take_damage(dmg: float) -> void:
 		return
 	if DevMenu.flag("god"):
 		hud.say("Бессмертие: −%d" % roundi(dmg), Color(0.6, 1.0, 0.6), 0.5)
+		return
+	if _room_guard:
+		_room_guard = false
+		hud.say("Несгибаемый!", Color(0.6, 0.8, 1.0), 0.9)
+		sfx.play("block", 0.0, 0.8)
 		return
 	hp = maxf(0.0, hp - dmg)
 	stats.taken += dmg
@@ -504,6 +524,7 @@ func _next_room() -> void:
 ## Дошли до комнаты: начинаем бой или ждём тапа по находке.
 func _arrive() -> void:
 	fade = 0.0
+	_room_guard = Hero.rank("d5") > 0
 	stats.rooms += 1
 	if str(room.kind) in ["fight", "elite", "boss"]:
 		wave = room.wave
@@ -519,6 +540,7 @@ func _arrive() -> void:
 
 func _room_cleared() -> void:
 	charging = false
+	gain_xp(int(hero_cfg.xp_room))
 	var kind := str(room.kind)
 	if kind == "boss":
 		stats.boss = 1
@@ -598,6 +620,103 @@ func _on_loot_chosen(take: bool) -> void:
 	persist()
 	if state == "loot":
 		_advance()
+
+
+# ============================================================ уровни и умения
+
+## Начислить опыт героя; при новом уровне — сообщение и очко талантов.
+func gain_xp(amount: int) -> void:
+	if amount <= 0:
+		return
+	run_xp += amount
+	var ups := Hero.add_xp(hero_cfg, amount)
+	if ups > 0:
+		stats.levels += ups
+		hud.say("Уровень %d! +%d очк. талантов" % [int(Save.data.level), ups], Color(1.0, 0.85, 0.4), 2.2)
+		sfx.play("victory", -6.0, 1.3)
+		_buzz(60)
+		for sk: Dictionary in hero_cfg.skills:
+			if int(sk.level) == int(Save.data.level):
+				hud.say("Новое умение: " + str(sk.name), Color.html(str(sk.color)), 2.6)
+
+
+## Старые улучшения из кузницы возвращаются осколками: теперь герой растёт через таланты.
+func _migrate_upgrades() -> void:
+	var ups: Dictionary = Save.data.get("upgrades", {})
+	var costs: Dictionary = items.get("legacy_upgrades", {})
+	var refund := 0
+	for id: String in ups:
+		for lvl in int(ups[id]):
+			refund += int(costs.get(id, 8)) * (lvl + 1)
+		ups[id] = 0
+	if refund > 0:
+		shards += refund
+		Save.data.shards = shards
+		Save.save()
+
+
+## Область кнопки умения на экране (для касаний и рисования).
+func skill_rect(i: int) -> Rect2:
+	var size: Vector2 = get_viewport().get_visible_rect().size
+	return Rect2(size.x - 78.0, size.y - 224.0 - i * 76.0, 68.0, 68.0)
+
+
+func skill_ready(i: int) -> bool:
+	var sk: Dictionary = hero_cfg.skills[i]
+	return Hero.skill_unlocked(sk) and skill_cd[i] <= 0.0 and state == "fight" \
+		and enemy != null and enemy.is_alive() and enemy.state != Enemy.State.APPEAR
+
+
+func _update_skills(delta: float) -> void:
+	var haste := 1.25 if Hero.rank("a5") > 0 else 1.0
+	for i in skill_cd.size():
+		skill_cd[i] = maxf(0.0, skill_cd[i] - delta * haste)
+	# Кнопки ловят касания только в бою
+	var zones: Array[Rect2] = []
+	if state == "fight":
+		for i in hero_cfg.skills.size():
+			zones.append(skill_rect(i))
+	gestures.tap_zones = zones
+
+
+func use_skill(i: int) -> void:
+	if i < 0 or i >= hero_cfg.skills.size():
+		return
+	var sk: Dictionary = hero_cfg.skills[i]
+	if not Hero.skill_unlocked(sk):
+		hud.say("%s откроется на %d уровне" % [sk.name, int(sk.level)], Color(0.8, 0.8, 0.85), 1.0)
+		return
+	if not skill_ready(i):
+		return
+	skill_cd[i] = float(sk.cooldown)
+	stats.skills += 1
+	charging = false
+	hud.say(str(sk.name), Color.html(str(sk.color)), 0.9)
+	_buzz(30)
+	match str(sk.id):
+		"bash":
+			block_t = 0.35
+			sfx.play("block", 2.0, 0.8)
+			var clash := enemy.global_position + Vector3(0, 1.3 * enemy.scale.y, 0.9)
+			hud.fx_parry(clash)
+			_shake = maxf(_shake, 0.5)
+			if enemy.state == Enemy.State.WINDUP:
+				enemy.parried(float(sk.stagger))
+			else:
+				enemy.take_hit(float(sk.damage), float(sk.stagger))
+		"whirl":
+			for n in int(sk.hits):
+				if enemy == null or not enemy.is_alive() or state != "fight":
+					break
+				attack_cd = 0.0
+				stamina += float(p.attack_cost)      # удары вихря не тратят стойкость
+				_attack(enemy.weak_side, float(sk.mult))
+				await get_tree().create_timer(0.16).timeout
+		"dawn":
+			var heal := max_hp * float(sk.heal)
+			hp = minf(max_hp, hp + heal)
+			sfx.play("stun", 0.0, 0.6)
+			hud.popup("+%d" % roundi(heal), camera.global_position + Vector3(0, -0.2, -1.5), Color(0.5, 1.0, 0.5), true)
 
 
 # ============================================================ дары, развилки, лавка
@@ -717,27 +836,32 @@ func _on_choice(kind: String, tag: String) -> void:
 
 ## Пересчитать параметры героя из базовых (combat.json), улучшений и оружия.
 func recalc() -> void:
-	var up: Dictionary = Save.data.upgrades
 	var w: Dictionary = Save.data.weapon
 	if not items.weapons.has(w.id):
 		w = Save.defaults().weapon
 		Save.data.weapon = w
 	weapon = items.weapons[w.id]
 	p = cfg.player.duplicate()
-	var dmg := Items.damage_mult(items, w) * (1.0 + 0.05 * int(up.damage))
+	var dmg := Items.damage_mult(items, w) * (1.0 + 0.06 * Hero.rank("s1"))
 	p.attack_damage = float(p.attack_damage) * dmg * (1.2 if str(w.affix) == "keen" else 1.0)
 	p.attack_off_damage = float(p.attack_off_damage) * dmg
-	p.attack_recovery = float(p.attack_recovery) * float(weapon.speed)
+	p.attack_recovery = float(p.attack_recovery) * float(weapon.speed) * (1.0 - 0.06 * Hero.rank("a2"))
 	p.attack_cost = float(p.attack_cost) * float(weapon.cost) * (0.75 if str(w.affix) == "light" else 1.0)
-	p.weak_stagger = float(p.weak_stagger) * float(weapon.stagger)
-	p.off_stagger = float(p.off_stagger) * float(weapon.stagger)
-	p.parry_stagger = float(p.parry_stagger) * (1.4 if str(w.affix) == "breaker" else 1.0)
+	var crush := 1.0 + 0.15 * Hero.rank("s3")
+	p.weak_stagger = float(p.weak_stagger) * float(weapon.stagger) * crush
+	p.off_stagger = float(p.off_stagger) * float(weapon.stagger) * crush
+	p.parry_stagger = float(p.parry_stagger) * (1.4 if str(w.affix) == "breaker" else 1.0) * crush
+	p.crit_chance = float(p.crit_chance) + 0.05 * Hero.rank("s2")
+	p.crit_mult = float(p.crit_mult) + 0.25 * Hero.rank("s4")
+	p.block_cost = float(p.block_cost) * (1.0 - 0.2 * Hero.rank("d3"))
+	p.dodge_cost = float(p.dodge_cost) * (1.0 - 0.25 * Hero.rank("a3"))
+	p.stamina_regen = float(p.stamina_regen) * (1.0 + 0.15 * Hero.rank("a4"))
 	p.charge_mult = float(p.charge_mult) * float(weapon.charge)
-	p.parry_window = float(p.parry_window) + 0.01 * int(up.parry)
+	p.parry_window = float(p.parry_window) + 0.015 * Hero.rank("d2")
 	var old_max := max_hp
-	max_hp = float(p.hp) + 10.0 * int(up.hp)
+	max_hp = float(p.hp) + 12.0 * Hero.rank("d1")
 	hp = minf(max_hp, hp + maxf(0.0, max_hp - old_max))
-	max_stamina = float(p.stamina) + 10.0 * int(up.stamina)
+	max_stamina = float(p.stamina) + 12.0 * Hero.rank("a1")
 	stamina = minf(stamina, max_stamina)
 	if enemy != null:
 		enemy.parry_window = float(p.parry_window)
@@ -1112,6 +1236,8 @@ func _attack(side: int, mult: float) -> void:
 	elif shielded:
 		stg += enemy.stagger_max * 0.6
 		hud.say("Щит пробит!", Color(1.0, 0.85, 0.4), 0.9)
+	if mult > 1.0 and Hero.rank("s5") > 0 and not (shielded and mult <= 1.0):
+		crit = true
 	if has_boon("fury") and hp < max_hp * 0.5:
 		dmg *= 1.3
 	if has_boon("executioner") and enemy.state == Enemy.State.STUNNED:

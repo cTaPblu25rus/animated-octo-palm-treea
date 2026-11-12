@@ -14,6 +14,7 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Settings := preload("res://scripts/settings.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
+const Hero := preload("res://scripts/hero.gd")
 const SPEEDS := [1.0, 0.25, 0.5, 2.0, 4.0]
 const SOUNDS := ["swing", "hit", "crit", "parry", "block", "hurt", "windup", "stun", "dodge", "death", "victory"]
 const META := "dev_menu"
@@ -131,6 +132,9 @@ func _build() -> void:
 	_add("legend", _drop_legend, "Легендарное оружие")
 	_add("boon", _boon, "Дар на выбор")
 	_add("forge", _forge, "Открыть кузницу")
+	_add("levelup", _levelup, "+1 уровень героя")
+	_add("talents", _talents, "Открыть таланты")
+	_add("cooldowns", _cooldowns, "Сбросить перезарядку умений")
 	_add("wipe", _wipe, "Сбросить сохранение")
 
 	_section("Бой")
@@ -192,6 +196,7 @@ func _add(key: String, action: Callable, text: String = "") -> void:
 func _set_open(open: bool) -> void:
 	if not open:
 		game.meta_ui.hide_forge()
+		game.meta_ui.hide_talents()
 	_panel.visible = open
 	_toggle.visible = not open
 	game.gestures.enabled = not open
@@ -287,6 +292,19 @@ func _drop_legend() -> void:
 func _boon() -> void:
 	_set_open(false)
 	game.offer_boons()
+
+
+func _levelup() -> void:
+	game.gain_xp(Hero.need(game.hero_cfg, int(Save.data.level)) - int(Save.data.xp))
+
+
+func _talents() -> void:
+	_set_open(false)
+	game.meta_ui.show_talents()
+
+
+func _cooldowns() -> void:
+	game.skill_cd = [0.0, 0.0, 0.0]
 
 
 func _forge() -> void:

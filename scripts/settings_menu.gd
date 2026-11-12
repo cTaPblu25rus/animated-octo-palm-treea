@@ -130,7 +130,10 @@ func _build() -> void:
 	_boons.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_boons.custom_minimum_size = Vector2(390, 0)
 	v.add_child(_boons)
-	var forge := _button("Кузница: улучшения и заточка", 60)
+	var talents := _button("Таланты и умения", 60)
+	talents.pressed.connect(func() -> void: game.meta_ui.show_talents())
+	v.add_child(talents)
+	var forge := _button("Кузница: заточка оружия", 56)
 	forge.pressed.connect(func() -> void: game.meta_ui.show_forge())
 	v.add_child(forge)
 	var restart := _button("Новый забег", 52)

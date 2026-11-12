@@ -7,6 +7,7 @@ extends CanvasLayer
 const Enemy := preload("res://scripts/enemy.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
+const Hero := preload("res://scripts/hero.gd")
 
 const GOLD := Color(0.96, 0.78, 0.36)
 const GOLD_DARK := Color(0.45, 0.3, 0.12)
@@ -490,6 +491,13 @@ func _draw_player(w: float, h: float, enemy: Enemy) -> void:
 	_canvas.draw_circle(hc, 20, GOLD)
 	_canvas.draw_circle(hc, 17, INK)
 	_heart(hc + Vector2(0, 1), 10.0 + (1.2 * sin(_time * 8.0) if low else 0.0), HP_RED)
+	# Уровень героя и полоска опыта под медальоном
+	var lvl := int(Save.data.level)
+	_text("Ур. %d" % lvl, Vector2(hc.x, hc.y + 40), 13, GOLD)
+	var xk := 1.0 if lvl >= int(game.hero_cfg.max_level) else float(Save.data.xp) / maxf(1.0, Hero.need(game.hero_cfg, lvl))
+	_canvas.draw_rect(Rect2(hc.x - 22, hc.y + 46, 44, 4), Color(INK, 0.9))
+	_canvas.draw_rect(Rect2(hc.x - 22, hc.y + 46, 44 * clampf(xk, 0.0, 1.0), 4), GOLD)
+	_draw_skills()
 
 	_fancy_bar(Rect2(px, hy + 30.0, pw * 0.5, 10), game.stamina / game.max_stamina, 0.0, STAMINA)
 	# Дары забега: ромбы цвета дара над полосой здоровья
@@ -515,6 +523,40 @@ func _draw_player(w: float, h: float, enemy: Enemy) -> void:
 	elif game.charging:
 		var k := clampf(game.charge_t / float(game.p.charge_time), 0.0, 1.0)
 		_fancy_bar(Rect2(w * 0.25, h - 34, w * 0.5, 10), k, 0.0, Color(1.0, 0.6, 0.2) if k < 1.0 else Color(1.0, 0.95, 0.5))
+
+
+## Кнопки умений справа: значок, круг перезарядки, замок с уровнем для закрытых.
+func _draw_skills() -> void:
+	if game.state != "fight":
+		return
+	var skills: Array = game.hero_cfg.skills
+	for i in skills.size():
+		var sk: Dictionary = skills[i]
+		var r: Rect2 = game.skill_rect(i)
+		var c := r.get_center()
+		var col := Color.html(str(sk.color))
+		var open := Hero.skill_unlocked(sk)
+		var cd: float = game.skill_cd[i]
+		var ready := open and cd <= 0.0
+		_canvas.draw_circle(c, 33.0, GOLD if ready else GOLD_DARK)
+		_canvas.draw_circle(c, 30.5, Color(col.darkened(0.72), 0.95) if open else Color(INK, 0.85))
+		var key := "skill_" + str(sk.icon)
+		if not _icons.has(key):
+			var ipath := "res://assets/icons/%s.png" % str(sk.icon)
+			_icons[key] = load(ipath) if ResourceLoader.exists(ipath) else null
+		var tex: Texture2D = _icons[key]
+		if tex != null:
+			var tint := col.lerp(Color.WHITE, 0.3) if ready else Color(col, 0.35 if open else 0.18)
+			_canvas.draw_texture_rect(tex, Rect2(c - Vector2(20, 20), Vector2(40, 40)), false, tint)
+		if not open:
+			_text("ур. %d" % int(sk.level), c + Vector2(0, 5), 14, Color(PARCHMENT, 0.8))
+		elif cd > 0.0:
+			# Сектор оставшейся перезарядки и секунды
+			var k := clampf(cd / float(sk.cooldown), 0.0, 1.0)
+			_canvas.draw_arc(c, 31.5, -PI / 2.0, -PI / 2.0 + TAU * (1.0 - k), 32, col, 4.0)
+			_text(str(ceili(cd)), c + Vector2(0, 7), 20, PARCHMENT)
+		else:
+			_canvas.draw_arc(c, 34.0 + sin(_time * 5.0) * 1.5, 0.0, TAU, 32, Color(col, 0.6), 2.0)
 
 
 ## Стрелка у края экрана со стороны удара. В окне парирования — белая, крупная, со свечением.
@@ -622,6 +664,7 @@ func _draw_result(w: float, h: float) -> void:
 		["Блоков и уклонений", str(int(s.blocks) + int(s.dodges))],
 		["Получено урона", str(roundi(s.taken))],
 		["Осколки / золото", "%d / %d" % [game.shards, game.gold]],
+		["Опыт", "+%d  ·  уровень %d" % [game.run_xp, int(Save.data.level)]],
 	]
 	for i in rows.size():
 		var ra := a * smoothstep(0.6 + i * 0.1, 0.9 + i * 0.1, _result_t)
@@ -630,7 +673,9 @@ func _draw_result(w: float, h: float) -> void:
 		y += 30
 	_text("Сид забега: %d" % game.run_seed, Vector2(cx, panel.end.y - 18), 12, Color(PARCHMENT, 0.45 * a))
 	if _result_t > 1.6:
-		_text("II — кузница и настройки", Vector2(cx, panel.end.y + 76), 15, Color(GOLD, 0.8))
+		if Hero.points() > 0:
+			_text("Есть свободные очки талантов: %d" % Hero.points(), Vector2(cx, panel.end.y + 100), 15, Color(0.6, 1.0, 0.6))
+		_text("II — таланты, кузница и настройки", Vector2(cx, panel.end.y + 76), 15, Color(GOLD, 0.8))
 		_text("Тап — новый забег", Vector2(cx, panel.end.y + 44), 21, Color(PARCHMENT, 0.6 + 0.4 * sin(_time * 4.0)))
 
 
