@@ -127,6 +127,75 @@
 					"title": "Последний рубеж!"
 				}
 			]
+		},
+		"ash_shield": {
+			"name": "Щитоносец",
+			"hp": 110,
+			"damage": 16,
+			"windup": 0.95,
+			"idle_min": 1.4,
+			"idle_max": 2.2,
+			"recover": 0.9,
+			"stagger_max": 120,
+			"stun_time": 2.4,
+			"sides": [
+				"left",
+				"right"
+			],
+			"eyes": "#6fd0ff",
+			"scale": 1.05,
+			"guard_hits": 3,
+			"model": "warrior",
+			"weapon": "blade",
+			"shield": true,
+			"guard": true,
+			"distance": 3.0
+		},
+		"ash_trickster": {
+			"name": "Обманщик",
+			"hp": 85,
+			"damage": 15,
+			"windup": 1.0,
+			"idle_min": 0.9,
+			"idle_max": 1.6,
+			"recover": 0.7,
+			"stagger_max": 90,
+			"stun_time": 2.0,
+			"sides": [
+				"left",
+				"right",
+				"top"
+			],
+			"eyes": "#b6ff5a",
+			"scale": 1.0,
+			"guard_hits": 2,
+			"model": "rogue",
+			"weapon": "blade",
+			"feint": 0.6
+		},
+		"ash_mage": {
+			"name": "Пепельный маг",
+			"hp": 70,
+			"damage": 18,
+			"windup": 1.5,
+			"idle_min": 1.2,
+			"idle_max": 1.9,
+			"recover": 0.8,
+			"stagger_max": 80,
+			"stun_time": 2.2,
+			"sides": [
+				"left",
+				"right",
+				"top"
+			],
+			"eyes": "#d07bff",
+			"scale": 1.0,
+			"guard_hits": 3,
+			"model": "mage",
+			"weapon": "staff",
+			"ranged": true,
+			"reflect": 22,
+			"distance": 3.6
 		}
 	}
 }

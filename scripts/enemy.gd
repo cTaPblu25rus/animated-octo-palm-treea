@@ -22,10 +22,14 @@ const MODELS := {
 	"minion": preload("res://assets/kaykit/skeletons/Skeleton_Minion.glb"),
 	"rogue": preload("res://assets/kaykit/skeletons/Skeleton_Rogue.glb"),
 	"warrior": preload("res://assets/kaykit/skeletons/Skeleton_Warrior.glb"),
+	"mage": preload("res://assets/kaykit/skeletons/Skeleton_Mage.glb"),
 }
+const SHIELD := preload("res://assets/kaykit/skeletons/Skeleton_Shield_Large_A.gltf")
+const ANIM_CAST := "Spellcast_Shoot"
 const WEAPONS := {
 	"blade": preload("res://assets/kaykit/skeletons/Skeleton_Blade.gltf"),
 	"axe": preload("res://assets/kaykit/skeletons/Skeleton_Axe.gltf"),
+	"staff": preload("res://assets/kaykit/skeletons/Skeleton_Staff.gltf"),
 }
 ## Модель KayKit высотой ~2.17; приводим к росту человека.
 const MODEL_SCALE := 1.0
@@ -69,6 +73,13 @@ var _hits_in_idle := 0
 var is_boss := false
 ## Декорация для заставки: стоит в стойке, не атакует, без метки слабого места.
 var passive := false
+## Особенности вида: щит (обычные удары в стойке почти не проходят), ложный замах, стрельба.
+var has_guard := false
+var feint_chance := 0.0
+var ranged := false
+var feinted := false            # в этом замахе сторона уже сменилась (для подсказки в HUD)
+var _feint_pending := false
+var _bolt: MeshInstance3D
 var phase := 0
 var windup_time := 1.0
 var combo := 1
@@ -105,6 +116,9 @@ func setup(enemy_id: String, d: Dictionary, seed_value: int) -> void:
 	guard_hits = int(d.get("guard_hits", 2))
 	is_boss = bool(d.get("boss", false))
 	windup_time = float(d.get("windup", 1.0))
+	has_guard = bool(d.get("guard", false))
+	feint_chance = float(d.get("feint", 0.0))
+	ranged = bool(d.get("ranged", false))
 	_rng.seed = seed_value
 	for s in d.get("sides", ["left", "right"]):
 		_sides.append(int(SIDE_BY_NAME[s]))
@@ -115,6 +129,11 @@ func setup(enemy_id: String, d: Dictionary, seed_value: int) -> void:
 
 func is_alive() -> bool:
 	return state != State.DYING and state != State.DEAD
+
+
+## Щит поднят: обычный удар почти не проходит, нужен заряженный или удар после атаки врага.
+func guarded() -> bool:
+	return has_guard and state == State.IDLE
 
 
 ## Открыт для точного удара: метка слабого места видна.
@@ -166,6 +185,9 @@ func parried(stagger_add: float) -> void:
 		_enter(State.RECOVER, float(data.get("recover", 0.7)) * 1.5)
 		_play(ANIM_PARRIED, 1.0, 0.05)
 		_anim.queue(ANIM_IDLE)
+	# Отбитый снаряд летит обратно в стрелка
+	if ranged:
+		take_hit(float(data.get("reflect", 20)), 0.0)
 
 
 func _start_attack() -> void:
@@ -219,8 +241,10 @@ func _enter(s: int, dur: float) -> void:
 			attack_side = _sides[_rng.randi_range(0, _sides.size() - 1)]
 			# Удар слева — та же анимация, отражённая зеркально
 			_model.scale.x = absf(_model.scale.x) * (-1.0 if attack_side == Side.LEFT else 1.0)
-			var attack: String = ANIM_ATTACK[attack_side]
+			var attack: String = ANIM_CAST if ranged else ANIM_ATTACK[attack_side]
 			_play(attack, _len(attack) * HIT_FRACTION / dur, 0.1)
+			feinted = false
+			_feint_pending = _rng.randf() < feint_chance
 			windup_started.emit(attack_side)
 		State.STUNNED:
 			_model.scale.x = absf(_model.scale.x)
@@ -240,6 +264,17 @@ func _process(delta: float) -> void:
 			if state_t >= state_dur and not passive:
 				_start_attack()
 		State.WINDUP:
+			# Ложный замах: на середине враг перекидывает удар на другую сторону
+			if _feint_pending and state_t >= state_dur * 0.5:
+				_feint_pending = false
+				feinted = true
+				var others: Array[int] = []
+				for sd in _sides:
+					if sd != attack_side:
+						others.append(sd)
+				attack_side = others[_rng.randi_range(0, others.size() - 1)]
+				_model.scale.x = absf(_model.scale.x) * (-1.0 if attack_side == Side.LEFT else 1.0)
+				windup_started.emit(attack_side)
 			if state_t >= state_dur:
 				var side := attack_side
 				if _combo_left > 0:
@@ -250,7 +285,7 @@ func _process(delta: float) -> void:
 					return
 				_enter(State.RECOVER, float(data.get("recover", 0.7)))
 				# Довести удар в обычном темпе (та же анимация продолжается без рестарта)
-				_anim.play(ANIM_ATTACK[side], -1, 1.3)
+				_anim.play(ANIM_CAST if ranged else ANIM_ATTACK[side], -1, 1.3)
 				_anim.queue(ANIM_IDLE)
 				struck.emit(side, float(data.get("damage", 10)))
 		State.RECOVER:
@@ -314,6 +349,16 @@ func _animate(delta: float) -> void:
 	# Глаза тускнеют при оглушении
 	_eye_mat.albedo_color = _eye_color * (0.3 if state == State.STUNNED else 1.0)
 
+	# Снаряд мага летит от посоха к герою всё время замаха
+	if _bolt != null:
+		_bolt.visible = state == State.WINDUP
+		if _bolt.visible:
+			var from := Vector3(0.25, 1.55, 0.45)
+			var side_x := -0.55 if attack_side == Side.LEFT else (0.55 if attack_side == Side.RIGHT else 0.0)
+			var to := Vector3(side_x, 2.0 if attack_side == Side.TOP else 1.45, absf(position.z) / scale.z - 0.7)
+			_bolt.position = from.lerp(to, p * p)
+			_bolt.scale = Vector3.ONE * (0.6 + 0.9 * p + 0.15 * sin(_time * 30.0))
+
 	# Метка слабого места
 	_orb.visible = is_open() and state != State.APPEAR and not passive
 	if _orb.visible:
@@ -361,6 +406,33 @@ func _build(model_id: String, weapon_id: String, sc: float) -> void:
 	for mi: MeshInstance3D in _meshes(weapon):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.material_overlay = _blade_mat
+
+	# Щит в левой руке
+	if bool(data.get("shield", false)):
+		var left := BoneAttachment3D.new()
+		left.bone_name = "handslot.l"
+		skeleton.add_child(left)
+		var shield: Node3D = SHIELD.instantiate()
+		left.add_child(shield)
+		for mi: MeshInstance3D in _meshes(shield):
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mi.material_overlay = _flash_mat
+
+	# Снаряд мага: светящийся шар
+	if ranged:
+		var bolt_mat := StandardMaterial3D.new()
+		bolt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bolt_mat.albedo_color = Color(0.85, 0.45, 1.0)
+		var bolt_mesh := SphereMesh.new()
+		bolt_mesh.radius = 0.13
+		bolt_mesh.height = 0.26
+		bolt_mesh.radial_segments = 12
+		bolt_mesh.rings = 6
+		_bolt = MeshInstance3D.new()
+		_bolt.mesh = bolt_mesh
+		_bolt.material_override = bolt_mat
+		_bolt.visible = false
+		_body_root.add_child(_bolt)
 
 	# Метка слабого места
 	_orb_mat = StandardMaterial3D.new()

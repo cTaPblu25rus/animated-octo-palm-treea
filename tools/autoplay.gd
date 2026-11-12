@@ -17,6 +17,8 @@ const REACTIONS := ["parry", "block", "parry", "dodge"]
 var game: Node
 ## false — запущен из меню разработчика: в конце не выходить из игры, только сообщить.
 var quit_on_end := true
+## --alt: на развилках бот сворачивает на вторую дорогу (элитные бои и лавки).
+var alt_path := false
 var shots_dir := ""
 var t := 0.0
 var done := false
@@ -29,10 +31,12 @@ var _shot_n := 0
 var _last_windup := -1
 var _room_t := 0.0
 var _fx_seen := {}
+var _shop_buys := 0
 var _fx_shots: Array = []
 
 
 func _ready() -> void:
+	alt_path = OS.get_cmdline_user_args().has("--alt")
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shots="):
 			shots_dir = a.trim_prefix("--shots=")
@@ -81,6 +85,24 @@ func _process(delta: float) -> void:
 			var cur: Dictionary = Save.data.weapon
 			game.meta_ui.choose(Items.power(game.items, game.meta_ui.offered) > Items.power(game.items, cur))
 		return
+	if game.state == "choice":
+		# Развилка — основная дорога; дар — первый; лавка — купить доступное, иначе уйти
+		_room_t += delta
+		if _room_t > 0.8 and game.meta_ui.is_choice_open():
+			_room_t = 0.0
+			var opts: Array = game.meta_ui.choice_options
+			var pick := 0
+			if game.meta_ui.choice_kind == "fork" and alt_path:
+				pick = 1
+			if game.meta_ui.choice_kind == "shop":
+				pick = opts.size() - 1
+				for i in opts.size() - 1:
+					if bool(opts[i].get("enabled", true)) and _shop_buys < 2:
+						pick = i
+						_shop_buys += 1
+						break
+			game.meta_ui.pick(pick)
+		return
 	if game.state == "room":
 		_room_t += delta
 		if _room_t > 0.8:
@@ -108,7 +130,8 @@ func _process(delta: float) -> void:
 		return
 	if game.attack_cd > 0.0 or game.stamina < 30.0:
 		return
-	if e.state == Enemy.State.STUNNED and game.stats.charged < 3 and game.stamina >= 40.0:
+	var break_guard: bool = e.guarded() and e.state_t < e.state_dur - 1.0
+	if ((e.state == Enemy.State.STUNNED and game.stats.charged < 3) or break_guard) and game.stamina >= 40.0:
 		game.gestures.press(_center())
 		_hold_t = 0.75
 		return
@@ -180,15 +203,29 @@ func _finish() -> void:
 	for key in ["weak_hits", "parries", "blocks", "dodges", "charged"]:
 		if int(s[key]) == 0:
 			missing.append(key)
-	for kind in ["fight", "chest", "altar", "event"]:
+	# На основной дороге обязаны встретиться все мирные комнаты, на второй — элита или лавка
+	var must: Array = ["fight", "chest", "altar", "event"]
+	if alt_path:
+		must = ["fight"]
+		if not (game.visited.has("elite") or game.visited.has("shop")):
+			missing.append("на второй дороге нет ни элиты, ни лавки")
+	for kind: String in must:
 		if not game.visited.has(kind):
 			missing.append("комната " + kind)
+	if int(s.boons) == 0:
+		missing.append("не выбран ни один дар")
+	if int(s.forks) == 0:
+		missing.append("не было развилок")
 	if int(s.drops) == 0:
 		missing.append("не выпало оружие")
 	if int(s.boss) == 0:
 		missing.append("босс не побеждён")
 	if int(s.rooms) != game.rooms.size():
 		missing.append("пройдено комнат %d из %d" % [s.rooms, game.rooms.size()])
+	var path: Array = []
+	for r: Dictionary in game.rooms:
+		path.append(str(r.kind) + ("(" + ",".join(r.wave) + ")" if r.has("wave") else ""))
+	print("BOT: путь: ", " → ".join(path))
 	if missing.is_empty():
 		print("BOT: ЗАБЕГ ПРОЙДЕН (сид %d, осколки %d, золото %d), все приёмы и типы комнат сработали" % [
 			game.run_seed, game.shards, game.gold])

@@ -13,6 +13,7 @@ const GOOD := Color(0.45, 0.9, 0.4)
 const BAD := Color(1.0, 0.45, 0.4)
 
 signal loot_chosen(take: bool)
+signal choice_made(kind: String, tag: String)
 
 var game: Node
 var offered: Dictionary = {}
@@ -23,6 +24,10 @@ var _loot_box: VBoxContainer
 var _forge: PanelContainer
 var _forge_box: VBoxContainer
 var _forge_buttons := {}
+var _choice: PanelContainer
+var _choice_box: VBoxContainer
+var choice_kind := ""
+var choice_options: Array = []     # [{title, text, color, tag, enabled}]
 
 
 func _ready() -> void:
@@ -37,6 +42,8 @@ func _ready() -> void:
 	_loot_box = _loot.get_child(0)
 	_forge = _panel()
 	_forge_box = _forge.get_child(0)
+	_choice = _panel()
+	_choice_box = _choice.get_child(0)
 
 
 func is_loot_open() -> bool:
@@ -96,6 +103,55 @@ func choose(take: bool) -> void:
 	_dim.visible = false
 	game.gestures.enabled = true
 	loot_chosen.emit(take)
+
+
+# ============================================================ выбор: дары, развилки, лавка
+
+func is_choice_open() -> bool:
+	return _choice.visible
+
+
+## Показать карточки на выбор. Каждая опция: {title, text, color, tag, enabled}.
+func show_choice(kind: String, title: String, subtitle: String, options: Array) -> void:
+	choice_kind = kind
+	choice_options = options
+	_clear(_choice_box)
+	_choice_box.add_child(_label(title, 28, GOLD, true))
+	if subtitle != "":
+		_choice_box.add_child(_label(subtitle, 15, Color(PARCHMENT, 0.75), true))
+	for i in options.size():
+		var o: Dictionary = options[i]
+		var col: Color = o.get("color", PARCHMENT)
+		var b := _button("%s\n%s" % [o.title, o.text] if str(o.get("text", "")) != "" else str(o.title), 84)
+		b.add_theme_color_override("font_color", col)
+		b.disabled = not bool(o.get("enabled", true))
+		for st in ["normal", "hover", "pressed", "focus"]:
+			b.add_theme_stylebox_override(st, _box(Color(INK, 0.9), Color(col, 0.75), 2, 12))
+		b.pressed.connect(pick.bind(i))
+		_choice_box.add_child(b)
+	_choice.visible = true
+	_dim.visible = true
+	game.gestures.enabled = false
+	_fit(_choice)
+
+
+func pick(index: int) -> void:
+	if not _choice.visible or index < 0 or index >= choice_options.size():
+		return
+	var o: Dictionary = choice_options[index]
+	if not bool(o.get("enabled", true)):
+		return
+	_choice.visible = false
+	_dim.visible = false
+	game.gestures.enabled = true
+	choice_made.emit(choice_kind, str(o.tag))
+
+
+func cancel_choice() -> void:
+	if _choice.visible:
+		_choice.visible = false
+		_dim.visible = _forge.visible
+		game.gestures.enabled = true
 
 
 # ============================================================ кузница

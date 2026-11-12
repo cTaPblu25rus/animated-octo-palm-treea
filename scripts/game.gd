@@ -33,7 +33,8 @@ const WALK_TIME := 1.5
 const WALK_DISTANCE := 3.2
 const CLEARED_DELAY := 1.5
 const CUT_TIME := 9.0
-const KIND_NAMES := {"boss": "Логово босса", "fight": "Бой", "chest": "Сундук", "altar": "Алтарь Зари", "event": "Находка"}
+const BOONS_PATH := "res://data/boons.json"
+const KIND_NAMES := {"boss": "Логово босса", "elite": "Элитный бой", "shop": "Лавка", "fight": "Бой", "chest": "Сундук", "altar": "Алтарь Зари", "event": "Находка"}
 const ENEMY_POS := Vector3(0.0, 0.0, -2.3)
 const CAMERA_POS := Vector3(0.0, 1.62, 0.0)
 const NEXT_ENEMY_DELAY := 1.3
@@ -93,7 +94,7 @@ var _run_rng := RandomNumberGenerator.new()
 
 ## Счётчики для автоигрока и итогового экрана.
 var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
-	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "crits": 0, "taken": 0.0, "hurt": 0, "kills": 0}
+	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "crits": 0, "boons": 0, "forks": 0, "bought": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
 var dev_menu: CanvasLayer
@@ -111,6 +112,14 @@ var _last_struck_side := 0
 var _chip_pool: Array[CPUParticles3D] = []
 var _chip_next := 0
 var _hitstop_until := 0          # момент (мс), до которого враг «заморожен»
+var boons_cfg: Dictionary = {}  # data/boons.json
+var boons: Array[String] = []   # дары этого забега
+var alts: Array = []            # вторая дорога для каждой комнаты (или null)
+var _steps: Array[String] = []  # что ещё показать после комнаты: loot, boon, end
+var _pending_loot: Dictionary = {}
+var _burn_t := 0.0
+var _burn_tick := 0.0
+var _second_wind_used := false
 var _loot_then := ""            # что делать после выбора добычи: cleared | cutscene
 var style: Dictionary = {}      # параметры текущего стиля графики, читает HUD
 var _lantern: OmniLight3D
@@ -145,6 +154,7 @@ func _ready() -> void:
 	_rng.randomize()
 	cfg = _load_json(DATA_PATH)
 	items = _load_json(ITEMS_PATH)
+	boons_cfg = _load_json(BOONS_PATH)
 	var testing := autoplay or OS.get_cmdline_user_args().has("--devtest")
 	Save.load_once(testing)
 	shards = int(Save.data.shards)
@@ -158,6 +168,7 @@ func _ready() -> void:
 		if a.begins_with("--seed="):
 			run_seed = int(a.trim_prefix("--seed="))
 	rooms = Run.generate(run_cfg, run_seed)
+	alts = Run.alternatives(run_cfg, rooms, run_seed)
 	_run_rng.seed = run_seed
 
 	if not autoplay:
@@ -187,6 +198,7 @@ func _ready() -> void:
 	meta_ui.game = self
 	add_child(meta_ui)
 	meta_ui.loot_chosen.connect(_on_loot_chosen)
+	meta_ui.choice_made.connect(_on_choice)
 	recalc()
 	hp = max_hp
 	stamina = max_stamina
@@ -249,12 +261,13 @@ func _process(delta: float) -> void:
 	_time += delta
 	_update_hitstop()
 	_update_music()
+	_update_burn(delta)
 	attack_cd = maxf(0.0, attack_cd - delta)
 	block_t = maxf(0.0, block_t - delta)
 	dodge_t = maxf(0.0, dodge_t - delta)
 	_since_spend += delta
 	if _since_spend > float(p.stamina_delay) and not charging:
-		stamina = minf(max_stamina, stamina + float(p.stamina_regen) * delta)
+		stamina = minf(max_stamina, stamina + float(p.stamina_regen) * delta * (1.5 if has_boon("swift") else 1.0))
 	if charging:
 		charge_t += delta
 
@@ -282,7 +295,7 @@ func _process(delta: float) -> void:
 func _spawn_next() -> void:
 	wave_index += 1
 	if wave_index >= wave.size():
-		var reward := int(run_cfg.fight_shards)
+		var reward := int(run_cfg.elite.shards) if str(room.kind) == "elite" else int(run_cfg.fight_shards)
 		shards += reward
 		if str(room.kind) != "boss":
 			hud.say("Комната очищена  +%d оск." % reward, Color(1.0, 0.85, 0.4), 1.3)
@@ -292,7 +305,14 @@ func _spawn_next() -> void:
 	enemy = Enemy.new()
 	enemy.position = Vector3(0.0, 0.0, -float(cfg.enemies[id].get("distance", -ENEMY_POS.z)))
 	add_child(enemy)
-	enemy.setup(id, cfg.enemies[id], _run_rng.randi())
+	var edata: Dictionary = cfg.enemies[id]
+	if str(room.kind) == "elite":
+		edata = edata.duplicate()
+		edata.hp = float(edata.hp) * float(run_cfg.elite.hp)
+		edata.damage = float(edata.damage) * float(run_cfg.elite.damage)
+		edata.name = "Элита: " + str(edata.name)
+	enemy.setup(id, edata, _run_rng.randi())
+	_burn_t = 0.0
 	enemy.parry_window = float(p.parry_window)
 	enemy.set_realistic(bool(style.realistic))
 	enemy.windup_started.connect(_on_windup)
@@ -351,7 +371,7 @@ func _on_struck(side: int, damage: float) -> void:
 		var cost := float(p.block_cost)
 		if stamina >= cost:
 			_spend(cost)
-			dmg *= 1.0 - float(p.block_reduction)
+			dmg *= 0.0 if has_boon("bulwark") else 1.0 - float(p.block_reduction)
 			stats.blocks += 1
 			sfx.play("block")
 			hud.say("Блок", Color(0.75, 0.8, 0.9), 0.6)
@@ -377,6 +397,11 @@ func _take_damage(dmg: float) -> void:
 	hud.fx_hurt(_last_struck_side)
 	_shake = maxf(_shake, 0.8)
 	_buzz(80)
+	if hp <= 0.0 and has_boon("second_wind") and not _second_wind_used:
+		_second_wind_used = true
+		hp = max_hp * 0.3
+		hud.say("Второе дыхание!", Color(0.5, 1.0, 0.8), 1.6)
+		sfx.play("stun", -2.0, 0.7)
 	if hp <= 0.0:
 		state = "defeat"
 		charging = false
@@ -469,6 +494,8 @@ func _next_room() -> void:
 			_make_altar()
 		"event":
 			_make_wisp()
+		"shop":
+			_make_shop()
 	state = "walk"
 	_walk_t = WALK_TIME
 	fade = 1.0
@@ -478,7 +505,7 @@ func _next_room() -> void:
 func _arrive() -> void:
 	fade = 0.0
 	stats.rooms += 1
-	if str(room.kind) == "fight" or str(room.kind) == "boss":
+	if str(room.kind) in ["fight", "elite", "boss"]:
 		wave = room.wave
 		wave_index = -1
 		_spawn_next()
@@ -497,12 +524,37 @@ func _room_cleared() -> void:
 		stats.boss = 1
 		Save.data.wins = int(Save.data.wins) + 1
 	persist()
-	var then := "cutscene" if kind == "boss" else "cleared"
-	if _roll_drop(kind):
-		_loot_then = then
-		state = "loot"
+	# Очередь того, что показать после комнаты: добыча, дар, затем развилка или переход
+	_steps.clear()
+	_pending_loot = _roll_drop(kind)
+	if not _pending_loot.is_empty():
+		_steps.append("loot")
+	if kind in ["fight", "elite"] and boons.size() < boons_cfg.size():
+		_steps.append("boon")
+	_steps.append("end")
+	_advance()
+
+
+func _advance() -> void:
+	if _steps.is_empty():
 		return
-	_finish_room(then)
+	var step: String = _steps.pop_front()
+	match step:
+		"loot":
+			state = "loot"
+			offer_loot(_pending_loot)
+		"boon":
+			offer_boons()
+		"shop":
+			_open_shop()
+		"end":
+			if str(room.kind) == "boss":
+				_begin_cutscene()
+			elif room_index + 1 < alts.size() and alts[room_index + 1] != null:
+				_offer_fork()
+			else:
+				state = "cleared"
+				_between_t = CLEARED_DELAY
 
 
 func _begin_cutscene() -> void:
@@ -512,27 +564,18 @@ func _begin_cutscene() -> void:
 	cut_total = maxf(CUT_TIME, voice.say_sequence(["cut_1", "cut_2", "cut_3"], 0.5, 0.8) + 2.6)
 
 
-func _finish_room(then: String) -> void:
-	if then == "cutscene":
-		_begin_cutscene()
-		return
-	state = "cleared"
-	_between_t = CLEARED_DELAY
-
-
 # ============================================================ добыча и улучшения
 
-## Выпало ли оружие за комнату. Если да — показывает карточку добычи.
-func _roll_drop(kind: String) -> bool:
+## Что выпало за комнату: экземпляр оружия или пустой словарь.
+func _roll_drop(kind: String) -> Dictionary:
 	var chances: Dictionary = items.drop_chance
 	var key := kind
 	if kind == "fight" and room_index == rooms.size() - 2:
 		key = "final"
 	if not chances.has(key) or _run_rng.randf() >= float(chances[key]):
-		return false
+		return {}
 	var depth := float(room_index) / maxf(1.0, rooms.size() - 1)
-	offer_loot(Items.roll(items, _run_rng, depth, 2 if kind == "boss" else 0))
-	return true
+	return Items.roll(items, _run_rng, depth, 2 if kind == "boss" else (1 if kind == "elite" else 0))
 
 
 func offer_loot(w: Dictionary) -> void:
@@ -554,7 +597,122 @@ func _on_loot_chosen(take: bool) -> void:
 		hud.say("Разобрано: +%d оск." % n, Color(0.6, 0.85, 1.0), 1.4)
 	persist()
 	if state == "loot":
-		_finish_room(_loot_then)
+		_advance()
+
+
+# ============================================================ дары, развилки, лавка
+
+func has_boon(id: String) -> bool:
+	return boons.has(id)
+
+
+## Предложить три дара на выбор (из тех, которых ещё нет).
+func offer_boons() -> void:
+	var pool: Array = []
+	for id: String in boons_cfg:
+		if not boons.has(id):
+			pool.append(id)
+	var options: Array = []
+	while options.size() < 3 and not pool.is_empty():
+		var id: String = pool.pop_at(_run_rng.randi_range(0, pool.size() - 1))
+		var b: Dictionary = boons_cfg[id]
+		options.append({"title": b.name, "text": b.text, "color": Color.html(str(b.color)), "tag": id})
+	if options.is_empty():
+		_advance()
+		return
+	state = "choice"
+	sfx.play("stun", -6.0, 1.3)
+	meta_ui.show_choice("boon", "ДАР ЗАРИ", "Выбери один — он действует до конца забега", options)
+
+
+func add_boon(id: String) -> void:
+	if not boons_cfg.has(id) or boons.has(id):
+		return
+	boons.append(id)
+	stats.boons += 1
+	var b: Dictionary = boons_cfg[id]
+	hud.say("Дар: " + str(b.name), Color.html(str(b.color)), 1.6)
+
+
+## Развилка: основная дорога или вторая. Выбранная комната встаёт на место следующей.
+func _offer_fork() -> void:
+	state = "choice"
+	var a: Dictionary = rooms[room_index + 1]
+	var b: Dictionary = alts[room_index + 1]
+	meta_ui.show_choice("fork", "РАЗВИЛКА", "Куда идти дальше?", [
+		{"title": "← " + str(KIND_NAMES[a.kind]), "text": _room_hint(a), "color": hud.PIP_COLORS[a.kind], "tag": "main"},
+		{"title": str(KIND_NAMES[b.kind]) + " →", "text": _room_hint(b), "color": hud.PIP_COLORS[b.kind], "tag": "alt"},
+	])
+
+
+func _room_hint(r: Dictionary) -> String:
+	match str(r.kind):
+		"fight":
+			return "Обычные враги, шанс на оружие и дар"
+		"elite":
+			return "Сильные враги: оружие наверняка, больше осколков"
+		"shop":
+			return "Лечение, оружие и дары за золото"
+		"chest":
+			return "Осколки и золото"
+		"altar":
+			return "Лечение"
+		"event":
+			return "Неизвестная находка"
+	return ""
+
+
+func _open_shop() -> void:
+	state = "choice"
+	var sh: Dictionary = run_cfg.shop
+	var heal := roundi(max_hp * float(sh.heal))
+	meta_ui.show_choice("shop", "ЛАВКА", "Золото: %d" % gold, [
+		{"title": "Лечение +%d — %d золота" % [heal, int(sh.heal_gold)], "text": "", "color": Color(0.5, 0.9, 0.5),
+			"tag": "heal", "enabled": gold >= int(sh.heal_gold) and hp < max_hp},
+		{"title": "Редкое оружие — %d золота" % int(sh.weapon_gold), "text": "Не ниже редкого", "color": Color(0.35, 0.65, 1.0),
+			"tag": "weapon", "enabled": gold >= int(sh.weapon_gold)},
+		{"title": "Дар на выбор — %d золота" % int(sh.boon_gold), "text": "", "color": Color(1.0, 0.8, 0.35),
+			"tag": "boon", "enabled": gold >= int(sh.boon_gold) and boons.size() < boons_cfg.size()},
+		{"title": "Уйти", "text": "", "color": Color(0.9, 0.88, 0.8), "tag": "leave"},
+	])
+
+
+func _on_choice(kind: String, tag: String) -> void:
+	match kind:
+		"boon":
+			add_boon(tag)
+			# Дар, купленный в лавке, возвращает в лавку
+			if str(room.kind) == "shop":
+				_open_shop()
+			else:
+				_advance()
+		"fork":
+			if tag == "alt":
+				rooms[room_index + 1] = alts[room_index + 1]
+			stats.forks += 1
+			state = "cleared"
+			_between_t = 0.3
+		"shop":
+			var sh: Dictionary = run_cfg.shop
+			match tag:
+				"heal":
+					gold -= int(sh.heal_gold)
+					hp = minf(max_hp, hp + max_hp * float(sh.heal))
+					sfx.play("stun", -4.0, 0.6)
+					_open_shop()
+				"weapon":
+					gold -= int(sh.weapon_gold)
+					_steps = ["shop"]
+					state = "loot"
+					offer_loot(Items.roll(items, _run_rng, 0.8, 1))
+				"boon":
+					gold -= int(sh.boon_gold)
+					offer_boons()
+				"leave":
+					_room_cleared()
+			if tag != "leave":
+				stats.bought += 1
+				persist()
 
 
 ## Пересчитать параметры героя из базовых (combat.json), улучшений и оружия.
@@ -602,6 +760,9 @@ func persist() -> void:
 ## Тап в мирной комнате: открыть сундук, коснуться алтаря, разобрать находку.
 func _use_room() -> void:
 	_prop_used = true
+	if str(room.kind) == "shop":
+		_open_shop()
+		return
 	match str(room.kind):
 		"chest":
 			shards += int(room.shards)
@@ -718,6 +879,8 @@ func _override(node: Node, mat: Material) -> void:
 
 func _dev_clear() -> void:
 	meta_ui.cancel_loot()
+	meta_ui.cancel_choice()
+	_steps.clear()
 	if enemy != null:
 		enemy.queue_free()
 		enemy = null
@@ -780,6 +943,20 @@ func _make_chest() -> void:
 	_model("coin_stack_large", Vector3(0.75, 0, 0.25), 0.5, 0.6, _prop)
 
 
+func _make_shop() -> void:
+	_prop = Node3D.new()
+	_prop.position = ENEMY_POS
+	add_child(_prop)
+	_model("box_stacked", Vector3(-0.2, 0, 0), 0.2, 0.42, _prop)
+	_model("barrel_large", Vector3(0.75, 0, 0.1), 0.0, 0.42, _prop)
+	_model("coin_stack_large", Vector3(0.75, 0.85, 0.1), 0.4, 0.55, _prop)
+	var orb := SphereMesh.new()
+	orb.radius = 0.1
+	orb.height = 0.2
+	_prop_glow = _part(_prop, orb, Vector3(0, 1.6, 0), _glow_mat(Color(1.0, 0.85, 0.4)))
+	_prop_light(Color(1.0, 0.8, 0.45), Vector3(0, 1.6, 0.5))
+
+
 func _make_altar() -> void:
 	_prop = Node3D.new()
 	_prop.position = ENEMY_POS
@@ -831,8 +1008,8 @@ func _animate_prop(delta: float) -> void:
 			if _prop_used:
 				_prop_lid.rotation.x = lerpf(_prop_lid.rotation.x, -1.5, 1.0 - exp(-9.0 * delta))
 				_prop_glow.visible = true
-		"altar", "event":
-			var base_y := 1.5 if str(room.kind) == "altar" else 1.1
+		"altar", "event", "shop":
+			var base_y := 1.5 if str(room.kind) == "altar" else (1.6 if str(room.kind) == "shop" else 1.1)
 			_prop_glow.position.y = base_y + sin(_time * 2.2) * 0.06
 			var target := 0.3 if _prop_used else 1.0 + 0.12 * sin(_time * 5.0)
 			_prop_glow.scale = _prop_glow.scale.lerp(Vector3.ONE * target, 1.0 - exp(-6.0 * delta))
@@ -893,6 +1070,9 @@ func _swipe(side: int) -> void:
 			_sword_move(_parry_pose(side), 0.12)
 			var clash := enemy.global_position + Vector3(0, 1.3 * enemy.scale.y, 0.9)
 			hud.fx_parry(clash)
+			if has_boon("thorns") and enemy.is_alive():
+				enemy.take_hit(15.0, 0.0)
+				hud.popup("15", clash, Color(0.6, 0.9, 0.4), false)
 			_chips(clash, 10, Color(1.0, 0.85, 0.4))
 			_hitstop(0.07)
 			_shake = maxf(_shake, 0.3)
@@ -921,10 +1101,30 @@ func _attack(side: int, mult: float) -> void:
 	var stg := float(p.weak_stagger) if weak else float(p.off_stagger)
 	if enemy.state == Enemy.State.STUNNED:
 		dmg *= float(p.stun_mult)
-	var crit := weak and _rng.randf() < float(p.crit_chance)
+	var crit := weak and _rng.randf() < float(p.crit_chance) + (0.15 if has_boon("lucky") else 0.0)
+	# Щит: обычный удар в стойке почти не проходит, заряженный — пробивает
+	var shielded := enemy.guarded()
+	if shielded and mult <= 1.0:
+		dmg *= 0.2
+		stg *= 0.5
+		crit = false
+		hud.say("Щит! Нужен заряженный удар", Color(0.6, 0.85, 1.0), 0.8)
+	elif shielded:
+		stg += enemy.stagger_max * 0.6
+		hud.say("Щит пробит!", Color(1.0, 0.85, 0.4), 0.9)
+	if has_boon("fury") and hp < max_hp * 0.5:
+		dmg *= 1.3
+	if has_boon("executioner") and enemy.state == Enemy.State.STUNNED:
+		dmg *= 1.5
+	if has_boon("momentum"):
+		dmg *= 1.0 + 0.03 * mini(hud.combo, 10)
+	if has_boon("leech") and weak:
+		hp = minf(max_hp, hp + 2.0)
 	if crit:
 		dmg *= float(p.crit_mult)
 		stats.crits += 1
+		if has_boon("burn"):
+			_burn_t = 3.0
 	dmg *= mult * damage_mult
 	if DevMenu.flag("one_hit"):
 		dmg = enemy.hp + 1.0
@@ -1039,12 +1239,24 @@ func _update_music() -> void:
 			track = "menu"
 		"defeat":
 			track = ""
-		"fight", "between", "loot":
-			track = "fight"
-	if state != "title" and room.get("kind", "") == "boss" and state in ["fight", "between", "walk"]:
+		"fight", "between", "loot", "choice":
+			track = "fight" if str(room.get("kind", "")) in ["fight", "elite"] else "dungeon"
+	if state != "title" and str(room.get("kind", "")) == "boss" and state in ["fight", "between", "walk", "loot"]:
 		track = "boss"
 	music.play(track)
 	music.duck(voice.subtitle != "")
+
+
+## Горение от дара «Пламя»: 2 урона каждые полсекунды.
+func _update_burn(delta: float) -> void:
+	if _burn_t <= 0.0 or enemy == null or not enemy.is_alive() or state != "fight":
+		return
+	_burn_t -= delta
+	_burn_tick += delta
+	if _burn_tick >= 0.5:
+		_burn_tick = 0.0
+		enemy.take_hit(2.0, 0.0)
+		hud.popup("2", enemy.global_position + Vector3(0, 1.6 * enemy.scale.y, 0.3), Color(1.0, 0.5, 0.15), false)
 
 
 func _update_hitstop() -> void:

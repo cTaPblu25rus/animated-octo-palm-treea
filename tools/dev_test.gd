@@ -167,6 +167,34 @@ func _run() -> void:
 	_check(game.shards == 0 and str(Save.data.weapon.id) == "guard_sword" and is_equal_approx(game.max_hp, 100.0), "сброс сохранения")
 	game.meta_ui.hide_forge()
 
+	# Дары и лавка
+	dev._set_open(true)
+	_press("boon")
+	_check(game.meta_ui.is_choice_open() and game.meta_ui.choice_kind == "boon" and game.meta_ui.choice_options.size() == 3, "три дара на выбор")
+	await _wait(0.3)
+	await _shot("boon")
+	var boon_id: String = game.meta_ui.choice_options[1].tag
+	game.meta_ui.pick(1)
+	_check(game.has_boon(boon_id) and not game.meta_ui.is_choice_open(), "дар получен: " + boon_id)
+	game.gold = 100
+	game.hp = 40.0
+	game._open_shop()
+	await _wait(0.3)
+	await _shot("shop")
+	_check(game.meta_ui.choice_kind == "shop", "лавка открывается")
+	game.meta_ui.pick(0)
+	_check(is_equal_approx(game.hp, 80.0) and game.gold == 75 and game.meta_ui.is_choice_open(), "лавка: лечение +40 за 25 золота, лавка остаётся открытой")
+	game.meta_ui.pick(1)
+	_check(game.gold == 15 and game.meta_ui.is_loot_open(), "лавка: куплено оружие, показана карточка")
+	game.meta_ui.choose(false)
+	_check(game.meta_ui.is_choice_open() and game.meta_ui.choice_kind == "shop", "после карточки возврат в лавку")
+	_check(not bool(game.meta_ui.choice_options[1].enabled), "без золота покупка недоступна")
+	game.meta_ui.cancel_choice()
+	game.dev_goto_room(1)
+	await _until(func() -> bool: return game.state != "walk")
+	game.hp = game.max_hp
+	game.gold = 0
+
 	# Новый забег с выбранным сидом: проверка продолжится после перезагрузки
 	dev._seed_pick = 12345
 	_press("seed_plus")

@@ -28,21 +28,56 @@ static func generate(cfg: Dictionary, seed_value: int) -> Array:
 		var kind := "fight"
 		if i > 0 and i < length - 1:
 			kind = middle[i - 1]
-		var room := {"kind": kind, "index": i}
-		match kind:
-			"fight":
-				var tier := "first" if i == 0 else ("final" if i == length - 1 else "middle")
-				var pool: Array = cfg.fights[tier]
-				room.wave = pool[rng.randi_range(0, pool.size() - 1)]
-			"chest":
-				room.shards = rng.randi_range(int(cfg.chest.shards_min), int(cfg.chest.shards_max))
-				room.gold = rng.randi_range(int(cfg.chest.gold_min), int(cfg.chest.gold_max))
-			"altar":
-				room.heal = float(cfg.altar.heal)
-			"event":
-				var events: Array = cfg.events
-				room.event = events[rng.randi_range(0, events.size() - 1)]
+		var tier := "first" if i == 0 else ("final" if i == length - 1 else "middle")
+		var room := make_room(cfg, rng, kind, i, tier)
 		rooms.append(room)
 	if cfg.has("boss"):
 		rooms.append({"kind": "boss", "index": length, "wave": [cfg.boss]})
 	return rooms
+
+
+## Собрать комнату нужного вида. tier выбирает набор врагов для боя.
+static func make_room(cfg: Dictionary, rng: RandomNumberGenerator, kind: String, index: int, tier: String = "middle") -> Dictionary:
+	var room := {"kind": kind, "index": index}
+	match kind:
+		"fight", "elite":
+			var pool: Array = cfg.fights["elite" if kind == "elite" else tier]
+			room.wave = pool[rng.randi_range(0, pool.size() - 1)]
+		"chest":
+			room.shards = rng.randi_range(int(cfg.chest.shards_min), int(cfg.chest.shards_max))
+			room.gold = rng.randi_range(int(cfg.chest.gold_min), int(cfg.chest.gold_max))
+		"altar":
+			room.heal = float(cfg.altar.heal)
+		"event":
+			var events: Array = cfg.events
+			room.event = events[rng.randi_range(0, events.size() - 1)]
+	return room
+
+
+## Развилки: для каждой комнаты середины забега — вторая дорога другого вида (или null).
+## Основной путь (rooms) не меняется, поэтому в нём по-прежнему есть сундук, алтарь и событие.
+static func alternatives(cfg: Dictionary, rooms: Array, seed_value: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 31 + 7
+	var table: Dictionary = cfg.get("alternatives", {})
+	var out: Array = []
+	var length := int(cfg.length)
+	var last := ""
+	var shop_used := false
+	for i in rooms.size():
+		var kind := str(rooms[i].kind)
+		if i == 0 or i >= length - 1 or not table.has(kind):
+			out.append(null)
+			continue
+		# Не ставим одинаковые вторые дороги подряд и не больше одной лавки на забег
+		var options: Array = []
+		for o: String in table[kind]:
+			if o != last and not (o == "shop" and shop_used):
+				options.append(o)
+		if options.is_empty():
+			out.append(null)
+			continue
+		last = str(options[rng.randi_range(0, options.size() - 1)])
+		shop_used = shop_used or last == "shop"
+		out.append(make_room(cfg, rng, last, i))
+	return out

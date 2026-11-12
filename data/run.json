@@ -21,13 +21,32 @@
 				"ash_veteran"
 			],
 			[
-				"ash_dead",
-				"ash_veteran"
+				"ash_shield"
+			],
+			[
+				"ash_trickster"
+			],
+			[
+				"ash_mage",
+				"ash_dead"
 			]
 		],
 		"final": [
 			[
 				"ash_veteran",
+				"ash_captain"
+			]
+		],
+		"elite": [
+			[
+				"ash_shield",
+				"ash_mage"
+			],
+			[
+				"ash_trickster",
+				"ash_veteran"
+			],
+			[
 				"ash_captain"
 			]
 		]
@@ -72,5 +91,34 @@
 		"Рыцарь Без Лица пал.",
 		"Пепел оседает. Решётка, что держала лес в плену, раскрыта.",
 		"Впервые за долгие годы над Проклятым лесом встаёт заря."
-	]
+	],
+	"elite": {
+		"hp": 1.35,
+		"damage": 1.15,
+		"shards": 6
+	},
+	"shop": {
+		"heal": 0.4,
+		"heal_gold": 25,
+		"weapon_gold": 60,
+		"boon_gold": 50
+	},
+	"alternatives": {
+		"fight": [
+			"elite",
+			"shop"
+		],
+		"chest": [
+			"fight",
+			"elite"
+		],
+		"altar": [
+			"shop",
+			"fight"
+		],
+		"event": [
+			"elite",
+			"shop"
+		]
+	}
 }
