@@ -12,6 +12,11 @@
 
 | Poly Haven: Castle Brick 07, Cobblestone Floor 08 | Poly Haven | камень стен и пола в реалистичном стиле | https://polyhaven.com/a/castle_brick_07 · https://polyhaven.com/a/cobblestone_floor_08 |
 
+## Значки
+Значки даров, комнат и товаров лавки — [game-icons.net](https://game-icons.net), лицензия
+**CC BY 3.0** (требует указания авторов): Lorc, Delapouite, Carl Olsen, Zeromancer.
+Список — в `assets/icons/LICENSE.txt`. Перед выпуском авторов нужно указать в титрах игры.
+
 ## Музыка
 Четыре трека с OpenGameArt.org, все под CC0: тема меню (cynicmusic), подземелье
 («Great Labyrinth»), бой («Battle Theme A»), босс (Juhani Junkala). Ссылки —

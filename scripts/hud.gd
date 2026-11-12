@@ -39,6 +39,7 @@ var _hp_trail := 1.0          # и на полосе героя
 var _result_t := 0.0
 var _last_ms := 0
 var _boss_card := 0.0
+var _icons := {}                  # значки даров
 var _fx: Array[Dictionary] = []   # эффекты ударов: вспышки, следы клинка, кольца, когти
 var _flash := 0.0                 # белая вспышка экрана на крит
 var combo := 0                    # серия точных ударов подряд
@@ -474,7 +475,7 @@ func _draw_message(w: float, h: float) -> void:
 
 ## Полосы героя: здоровье со значком сердца и числом, стойкость, заряд, подсказка.
 func _draw_player(w: float, h: float, enemy: Enemy) -> void:
-	_text(_hint(enemy), Vector2(w * 0.5, h - 112), 15, Color(PARCHMENT, 0.8))
+	_text(_hint(enemy), Vector2(w * 0.5, h - (146 if not game.boons.is_empty() else 112)), 15, Color(PARCHMENT, 0.8))
 
 	var px := 62.0
 	var pw := w - px - 22.0
@@ -493,10 +494,17 @@ func _draw_player(w: float, h: float, enemy: Enemy) -> void:
 	_fancy_bar(Rect2(px, hy + 30.0, pw * 0.5, 10), game.stamina / game.max_stamina, 0.0, STAMINA)
 	# Дары забега: ромбы цвета дара над полосой здоровья
 	for i in game.boons.size():
-		var bc := Color.html(str(game.boons_cfg[game.boons[i]].color))
-		var bp := Vector2(px + 10.0 + i * 20.0, hy - 13.0)
-		_diamond(bp, 8.0, INK)
-		_diamond(bp, 6.0, bc)
+		var bid: String = game.boons[i]
+		var bc := Color.html(str(game.boons_cfg[bid].color))
+		var bp := Vector2(px + 14.0 + i * 30.0, hy - 19.0)
+		_canvas.draw_circle(bp, 14.0, bc)
+		_canvas.draw_circle(bp, 12.5, Color(INK, 0.95))
+		if not _icons.has(bid):
+			var ipath := "res://assets/icons/%s.png" % bid
+			_icons[bid] = load(ipath) if ResourceLoader.exists(ipath) else null
+		var tex: Texture2D = _icons[bid]
+		if tex != null:
+			_canvas.draw_texture_rect(tex, Rect2(bp - Vector2(10, 10), Vector2(20, 20)), false, bc.lerp(Color.WHITE, 0.25))
 	# Оружие в руке: название цветом редкости
 	var wpn: Dictionary = Save.data.weapon
 	_text_right(Items.title(game.items, wpn), Vector2(px + pw, hy + 41.0), 14, Items.color(game.items, wpn))

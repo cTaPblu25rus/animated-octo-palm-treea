@@ -616,7 +616,7 @@ func offer_boons() -> void:
 	while options.size() < 3 and not pool.is_empty():
 		var id: String = pool.pop_at(_run_rng.randi_range(0, pool.size() - 1))
 		var b: Dictionary = boons_cfg[id]
-		options.append({"title": b.name, "text": b.text, "color": Color.html(str(b.color)), "tag": id})
+		options.append({"title": b.name, "text": b.text, "color": Color.html(str(b.color)), "tag": id, "icon": id})
 	if options.is_empty():
 		_advance()
 		return
@@ -640,8 +640,8 @@ func _offer_fork() -> void:
 	var a: Dictionary = rooms[room_index + 1]
 	var b: Dictionary = alts[room_index + 1]
 	meta_ui.show_choice("fork", "РАЗВИЛКА", "Куда идти дальше?", [
-		{"title": "← " + str(KIND_NAMES[a.kind]), "text": _room_hint(a), "color": hud.PIP_COLORS[a.kind], "tag": "main"},
-		{"title": str(KIND_NAMES[b.kind]) + " →", "text": _room_hint(b), "color": hud.PIP_COLORS[b.kind], "tag": "alt"},
+		{"title": "← " + str(KIND_NAMES[a.kind]), "text": _room_hint(a), "color": hud.PIP_COLORS[a.kind], "tag": "main", "icon": str(a.kind)},
+		{"title": str(KIND_NAMES[b.kind]) + " →", "text": _room_hint(b), "color": hud.PIP_COLORS[b.kind], "tag": "alt", "icon": str(b.kind)},
 	])
 
 
@@ -668,12 +668,12 @@ func _open_shop() -> void:
 	var heal := roundi(max_hp * float(sh.heal))
 	meta_ui.show_choice("shop", "ЛАВКА", "Золото: %d" % gold, [
 		{"title": "Лечение +%d — %d золота" % [heal, int(sh.heal_gold)], "text": "", "color": Color(0.5, 0.9, 0.5),
-			"tag": "heal", "enabled": gold >= int(sh.heal_gold) and hp < max_hp},
+			"icon": "heal", "tag": "heal", "enabled": gold >= int(sh.heal_gold) and hp < max_hp},
 		{"title": "Редкое оружие — %d золота" % int(sh.weapon_gold), "text": "Не ниже редкого", "color": Color(0.35, 0.65, 1.0),
-			"tag": "weapon", "enabled": gold >= int(sh.weapon_gold)},
+			"icon": "weapon", "tag": "weapon", "enabled": gold >= int(sh.weapon_gold)},
 		{"title": "Дар на выбор — %d золота" % int(sh.boon_gold), "text": "", "color": Color(1.0, 0.8, 0.35),
-			"tag": "boon", "enabled": gold >= int(sh.boon_gold) and boons.size() < boons_cfg.size()},
-		{"title": "Уйти", "text": "", "color": Color(0.9, 0.88, 0.8), "tag": "leave"},
+			"icon": "gem", "tag": "boon", "enabled": gold >= int(sh.boon_gold) and boons.size() < boons_cfg.size()},
+		{"title": "Уйти", "text": "", "color": Color(0.9, 0.88, 0.8), "tag": "leave", "icon": "leave"},
 	])
 
 

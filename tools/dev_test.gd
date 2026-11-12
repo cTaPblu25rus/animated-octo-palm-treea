@@ -133,7 +133,9 @@ func _run() -> void:
 	_press("wipe")
 	_press("legend")
 	_check(game.meta_ui.is_loot_open() and int(game.meta_ui.offered.rarity) == 3, "карточка легендарного оружия")
-	await _wait(0.3)
+	await _wait(0.4)
+	await _shot("loot_a")
+	await _wait(1.8)
 	await _shot("loot")
 	var offered: Dictionary = game.meta_ui.offered
 	game.meta_ui.choose(true)
