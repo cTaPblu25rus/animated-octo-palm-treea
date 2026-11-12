@@ -9,6 +9,7 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Run := preload("res://scripts/run.gd")
+const DevMenu := preload("res://scripts/dev_menu.gd")
 
 const DUNGEON := "res://assets/kaykit/dungeon/"
 const HERO_SWORD := preload("res://assets/kaykit/hero/sword_1handed.gltf")
@@ -83,6 +84,7 @@ var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
 	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
+var dev_menu: CanvasLayer
 var hud: CanvasLayer
 var sfx: Node
 var camera: Camera3D
@@ -115,6 +117,8 @@ func _ready() -> void:
 	stamina = max_stamina
 	run_cfg = _load_json(RUN_PATH)
 	run_seed = 1 if autoplay else int(_rng.randi() % 1000000)
+	if int(DevMenu.flags().seed) >= 0 and not autoplay:
+		run_seed = int(DevMenu.flags().seed)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--seed="):
 			run_seed = int(a.trim_prefix("--seed="))
@@ -131,8 +135,17 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
+	# Меню разработчика — только в debug-сборке
+	if OS.is_debug_build():
+		dev_menu = DevMenu.new()
+		dev_menu.game = self
+		add_child(dev_menu)
 	_next_room()
 
+	if OS.get_cmdline_user_args().has("--devtest"):
+		var test: Node = load("res://tools/dev_test.gd").new()
+		test.game = self
+		add_child(test)
 	if autoplay:
 		var bot: Node = load("res://tools/autoplay.gd").new()
 		bot.game = self
@@ -262,6 +275,9 @@ func _on_struck(side: int, damage: float) -> void:
 func _take_damage(dmg: float) -> void:
 	if dmg <= 0.0:
 		return
+	if DevMenu.flag("god"):
+		hud.say("Бессмертие: −%d" % roundi(dmg), Color(0.6, 1.0, 0.6), 0.5)
+		return
 	hp = maxf(0.0, hp - dmg)
 	stats.taken += dmg
 	stats.hurt += 1
@@ -275,6 +291,8 @@ func _take_damage(dmg: float) -> void:
 
 
 func _spend(amount: float) -> void:
+	if DevMenu.flag("stamina"):
+		return
 	stamina = maxf(0.0, stamina - amount)
 	_since_spend = 0.0
 
@@ -376,7 +394,16 @@ func _apply_event(ev: Dictionary) -> void:
 ## Кат-сцена победы: за решёткой разгорается заря, туман теплеет, герой идёт к свету.
 func _run_cutscene(delta: float) -> void:
 	cut_t += delta
-	var k := smoothstep(0.8, 6.5, cut_t)
+	_set_dawn(smoothstep(0.8, 6.5, cut_t))
+	white = smoothstep(CUT_TIME - 2.2, CUT_TIME - 0.6, cut_t)
+	if cut_t >= CUT_TIME:
+		state = "victory"
+		sfx.play("victory", -2.0)
+		_buzz(120)
+
+
+## Сила рассвета 0..1: свет за решёткой, тёплый туман, яркость окружения.
+func _set_dawn(k: float) -> void:
 	_dawn.light_energy = 6.0 * k
 	_dawn_glow.albedo_color = Color(0.02, 0.02, 0.03).lerp(Color(1.0, 0.86, 0.55), k)
 	_env.fog_light_color = Color(0.08, 0.1, 0.16).lerp(Color(0.95, 0.7, 0.4), k)
@@ -384,11 +411,43 @@ func _run_cutscene(delta: float) -> void:
 	_env.ambient_light_color = Color(0.25, 0.3, 0.42).lerp(Color(1.0, 0.85, 0.65), k)
 	_env.ambient_light_energy = lerpf(0.45, 1.0, k)
 	_moon.light_energy = lerpf(0.35, 0.0, k)
-	white = smoothstep(CUT_TIME - 2.2, CUT_TIME - 0.6, cut_t)
-	if cut_t >= CUT_TIME:
-		state = "victory"
-		sfx.play("victory", -2.0)
-		_buzz(120)
+
+
+# ============================================================ для меню разработчика
+
+func _dev_clear() -> void:
+	if enemy != null:
+		enemy.queue_free()
+		enemy = null
+	charging = false
+	block_t = 0.0
+	dodge_t = 0.0
+	cut_t = 0.0
+	white = 0.0
+	_set_dawn(0.0)
+
+
+## Перейти в комнату i (номер с нуля). За последней комнатой — экран итога.
+func dev_goto_room(i: int) -> void:
+	_dev_clear()
+	room_index = clampi(i, 0, rooms.size()) - 1
+	_next_room()
+
+
+func dev_cutscene() -> void:
+	_dev_clear()
+	if _prop != null:
+		_prop.queue_free()
+		_prop = null
+	fade = 0.0
+	stats.boss = 1
+	state = "cutscene"
+
+
+func dev_victory() -> void:
+	_dev_clear()
+	fade = 0.0
+	state = "victory"
 
 
 func _walk_offset() -> float:
@@ -554,6 +613,8 @@ func _attack(side: int, mult: float) -> void:
 	if enemy.state == Enemy.State.STUNNED:
 		dmg *= float(p.stun_mult)
 	dmg *= mult * damage_mult
+	if DevMenu.flag("one_hit"):
+		dmg = enemy.hp + 1.0
 	stg *= mult
 	enemy.take_hit(dmg, stg)
 	stats.hits += 1
