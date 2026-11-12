@@ -1,0 +1,92 @@
+{
+	"player": {
+		"hp": 100,
+		"stamina": 100,
+		"stamina_regen": 30,
+		"stamina_delay": 0.6,
+		"attack_damage": 12,
+		"attack_off_damage": 5,
+		"attack_recovery": 0.3,
+		"attack_cost": 9,
+		"weak_stagger": 14,
+		"off_stagger": 3,
+		"charge_time": 0.25,
+		"charge_mult": 2.5,
+		"charge_cost": 16,
+		"block_time": 0.6,
+		"block_cost": 22,
+		"block_reduction": 0.8,
+		"dodge_time": 0.32,
+		"dodge_cost": 18,
+		"parry_window": 0.25,
+		"parry_stagger": 45,
+		"early_parry_cost": 10,
+		"stun_mult": 2.0
+	},
+	"enemies": {
+		"ash_dead": {
+			"name": "Пепельный мертвец",
+			"hp": 90,
+			"damage": 14,
+			"windup": 1.0,
+			"idle_min": 1.3,
+			"idle_max": 2.0,
+			"recover": 0.75,
+			"stagger_max": 100,
+			"stun_time": 2.2,
+			"sides": [
+				"left",
+				"right"
+			],
+			"color": "#5a4f45",
+			"eyes": "#ff7a1a",
+			"scale": 1.0,
+			"guard_hits": 2
+		},
+		"ash_veteran": {
+			"name": "Мертвец-ветеран",
+			"hp": 120,
+			"damage": 16,
+			"windup": 0.85,
+			"idle_min": 1.0,
+			"idle_max": 1.7,
+			"recover": 0.65,
+			"stagger_max": 110,
+			"stun_time": 2.0,
+			"sides": [
+				"left",
+				"right",
+				"top"
+			],
+			"color": "#4b4a52",
+			"eyes": "#ff4d1a",
+			"scale": 1.08,
+			"guard_hits": 2
+		},
+		"ash_captain": {
+			"name": "Пепельный капитан",
+			"hp": 160,
+			"damage": 20,
+			"windup": 0.75,
+			"idle_min": 0.8,
+			"idle_max": 1.4,
+			"recover": 0.6,
+			"stagger_max": 130,
+			"stun_time": 1.8,
+			"sides": [
+				"left",
+				"right",
+				"top"
+			],
+			"color": "#3d3540",
+			"eyes": "#ff2a2a",
+			"scale": 1.2,
+			"guard_hits": 3
+		}
+	},
+	"wave": [
+		"ash_dead",
+		"ash_veteran",
+		"ash_captain"
+	]
+}
