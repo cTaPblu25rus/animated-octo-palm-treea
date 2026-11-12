@@ -324,6 +324,8 @@ func _on_draw() -> void:
 	if _hurt > 0.0:
 		_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false, Color(1.0, 0.1, 0.05, _hurt))
 
+	if game.state == "title":
+		return
 	if not cinematic and game.state != "victory" and game.state != "loot":
 		_draw_path(w)
 		_draw_purse(w)
@@ -358,6 +360,7 @@ func _on_draw() -> void:
 
 	if game.state == "cutscene" or (game.state == "victory" and game.cut_t > 0.0):
 		_draw_cutscene(w, h)
+	_draw_subtitle(w, h)
 	if game.state == "victory" or game.state == "defeat":
 		_draw_result(w, h)
 
@@ -530,20 +533,26 @@ func _draw_cutscene(w: float, h: float) -> void:
 	var t: float = game.cut_t
 	if game.state == "cutscene":
 		_letterbox(w, h, smoothstep(0.0, 0.8, t))
-		var lines: Array = game.run_cfg.get("cutscene", [])
-		var slot: float = (game.CUT_TIME - 2.4) / maxf(1.0, lines.size())
-		for i in lines.size():
-			var lt := t - 0.6 - i * slot
-			var a := smoothstep(0.0, 0.6, lt) * (1.0 - smoothstep(slot - 0.5, slot, lt))
-			if a <= 0.0:
-				continue
-			var y := h * 0.925
-			for line in _wrap(str(lines[i]), 19, w * 0.9):
-				_text(line, Vector2(w * 0.5, y), 19, Color(PARCHMENT, a))
-				y += 28
 	if game.white > 0.0:
 		var a: float = game.white if game.state == "cutscene" else maxf(0.0, 1.0 - _result_t * 1.2)
 		_canvas.draw_rect(Rect2(0, 0, w, h), Color(1.0, 0.95, 0.82, a))
+
+
+## Субтитры озвучки: в кат-сцене и на заставке босса — в нижней чёрной полосе, в бою — под полосой врага.
+func _draw_subtitle(w: float, h: float) -> void:
+	var sub: String = game.voice.subtitle
+	if sub == "" or game.state == "title":
+		return
+	var cinematic: bool = game.state == "cutscene" or _boss_card > 0.5
+	var y := h * 0.925 if cinematic else 150.0
+	var col := Color(1.0, 0.72, 0.66) if str(game.voice.speaker) == "boss" else PARCHMENT
+	var lines := _wrap(("«%s»" % sub) if str(game.voice.speaker) == "boss" else sub, 19, w * 0.9)
+	if not cinematic:
+		var bh := lines.size() * 26.0 + 12.0
+		_canvas.draw_style_box(_box_style(Color(INK, 0.6), Color(0, 0, 0, 0), 0, 10), Rect2(w * 0.04, y - 22.0, w * 0.92, bh))
+	for line in lines:
+		_text(line, Vector2(w * 0.5, y), 19, col)
+		y += 26.0
 
 
 ## Экран итога: тёмная панель с золотой рамкой, звёзды, строки статистики.

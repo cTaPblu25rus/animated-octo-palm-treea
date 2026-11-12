@@ -67,6 +67,8 @@ var guard_hits := 2
 var _hits_in_idle := 0
 ## Босс: фазы по порогам здоровья меняют длину замаха и число ударов подряд.
 var is_boss := false
+## Декорация для заставки: стоит в стойке, не атакует, без метки слабого места.
+var passive := false
 var phase := 0
 var windup_time := 1.0
 var combo := 1
@@ -235,7 +237,7 @@ func _process(delta: float) -> void:
 			if state_t >= state_dur:
 				_enter(State.IDLE, _idle_time())
 		State.IDLE:
-			if state_t >= state_dur:
+			if state_t >= state_dur and not passive:
 				_start_attack()
 		State.WINDUP:
 			if state_t >= state_dur:
@@ -313,7 +315,7 @@ func _animate(delta: float) -> void:
 	_eye_mat.albedo_color = _eye_color * (0.3 if state == State.STUNNED else 1.0)
 
 	# Метка слабого места
-	_orb.visible = is_open() and state != State.APPEAR
+	_orb.visible = is_open() and state != State.APPEAR and not passive
 	if _orb.visible:
 		var target: Vector3 = ORB_POS[weak_side]
 		if state == State.STUNNED:
