@@ -13,6 +13,8 @@ const TIMEOUT := 420.0
 const REACTIONS := ["parry", "block", "parry", "dodge"]
 
 var game: Node
+## false — запущен из меню разработчика: в конце не выходить из игры, только сообщить.
+var quit_on_end := true
 var shots_dir := ""
 var t := 0.0
 var done := false
@@ -31,7 +33,8 @@ func _ready() -> void:
 		if a.begins_with("--shots="):
 			shots_dir = a.trim_prefix("--shots=")
 			DirAccess.make_dir_recursive_absolute(shots_dir)
-	Engine.time_scale = 3.0 if shots_dir == "" else 1.0
+	if quit_on_end:
+		Engine.time_scale = 3.0 if shots_dir == "" else 1.0
 	var kinds: Array = []
 	for r: Dictionary in game.rooms:
 		kinds.append(r.kind)
@@ -174,8 +177,17 @@ func _fail(reason: String) -> void:
 	await _end(1)
 
 
+func _exit_tree() -> void:
+	# Не оставлять палец «прижатым», если бота выключили посреди удержания
+	if _hold_t > 0.0:
+		game.gestures.release(_center())
+
+
 func _end(code: int) -> void:
 	done = true
+	if not quit_on_end:
+		game.hud.say("Автоигрок: %s" % ("всё прошло" if code == 0 else "не прошёл, см. лог"), Color(0.6, 1.0, 0.6), 2.5)
+		return
 	Engine.time_scale = 1.0
 	if shots_dir != "":
 		await get_tree().create_timer(3.0).timeout

@@ -79,6 +79,9 @@ jobs:
       - name: Автотест (автоигрок проходит первый бой)
         run: timeout 120 ~/godot-bin/godot --headless --path . -- --autoplay
 
+      - name: Автотест меню разработчика
+        run: timeout 120 ~/godot-bin/godot --headless --path . -- --devtest
+
       - name: Экспорт APK
         run: |
           mkdir -p build

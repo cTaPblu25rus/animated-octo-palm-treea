@@ -17,6 +17,7 @@
 ```bash
 godot --headless --path . --import
 godot --headless --path . -- --autoplay   # автоигрок должен пройти первый бой (код 0)
+godot --headless --path . -- --devtest    # автотест меню разработчика (код 0)
 ```
 Если меняется баланс или комнаты, обнови план в `tools/autoplay.gd`.
 
