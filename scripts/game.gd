@@ -8,8 +8,14 @@ const Gestures := preload("res://scripts/gestures.gd")
 const Enemy := preload("res://scripts/enemy.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
+const Run := preload("res://scripts/run.gd")
 
 const DATA_PATH := "res://data/combat.json"
+const RUN_PATH := "res://data/run.json"
+const WALK_TIME := 1.5
+const WALK_DISTANCE := 3.2
+const CLEARED_DELAY := 1.5
+const KIND_NAMES := {"fight": "Бой", "chest": "Сундук", "altar": "Алтарь Зари", "event": "Находка"}
 const ENEMY_POS := Vector3(0.0, 0.0, -2.3)
 const CAMERA_POS := Vector3(0.0, 1.62, 0.0)
 const NEXT_ENEMY_DELAY := 1.3
@@ -18,7 +24,9 @@ const SIDE_NAMES := ["слева", "справа", "сверху"]
 
 var cfg: Dictionary = {}
 var p: Dictionary = {}          # параметры игрока из JSON
-var state := "fight"            # fight | between | victory | defeat
+## fight — бой; between — пауза между врагами; room — мирная комната ждёт тапа;
+## cleared — комната пройдена, пауза; walk — переход; victory | defeat — итог.
+var state := "walk"
 var autoplay := false
 
 # Игрок
@@ -40,9 +48,27 @@ var wave: Array = []
 var wave_index := -1
 var _between_t := 0.0
 
+# Забег
+var run_cfg: Dictionary = {}
+var run_seed := 0
+var rooms: Array = []
+var room_index := -1
+var room: Dictionary = {}
+var shards := 0
+var gold := 0
+var damage_mult := 1.0
+var visited := {}
+var fade := 1.0                 # затемнение экрана при переходе, читает HUD
+var _walk_t := 0.0
+var _prop: Node3D
+var _prop_lid: Node3D
+var _prop_glow: MeshInstance3D
+var _prop_used := false
+var _run_rng := RandomNumberGenerator.new()
+
 ## Счётчики для автоигрока и итогового экрана.
 var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
-	"charged": 0, "stuns": 0, "taken": 0.0, "hurt": 0, "kills": 0}
+	"charged": 0, "stuns": 0, "rooms": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
 var hud: CanvasLayer
@@ -75,7 +101,13 @@ func _ready() -> void:
 	hp = max_hp
 	max_stamina = float(p.stamina)
 	stamina = max_stamina
-	wave = cfg.wave
+	run_cfg = _load_json(RUN_PATH)
+	run_seed = 1 if autoplay else int(_rng.randi() % 1000000)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--seed="):
+			run_seed = int(a.trim_prefix("--seed="))
+	rooms = Run.generate(run_cfg, run_seed)
+	_run_rng.seed = run_seed
 
 	sfx = Sfx.new()
 	add_child(sfx)
@@ -87,7 +119,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
-	_spawn_next()
+	_next_room()
 
 	if autoplay:
 		var bot: Node = load("res://tools/autoplay.gd").new()
@@ -117,10 +149,21 @@ func _process(delta: float) -> void:
 	if charging:
 		charge_t += delta
 
-	if state == "between":
-		_between_t -= delta
-		if _between_t <= 0.0:
-			_spawn_next()
+	match state:
+		"between":
+			_between_t -= delta
+			if _between_t <= 0.0:
+				_spawn_next()
+		"cleared":
+			_between_t -= delta
+			if _between_t <= 0.0:
+				_next_room()
+		"walk":
+			_walk_t -= delta
+			fade = clampf(_walk_t / WALK_TIME * 1.6 - 0.3, 0.0, 1.0)
+			if _walk_t <= 0.0:
+				_arrive()
+	_animate_prop(delta)
 
 	_animate_view(delta)
 
@@ -128,16 +171,16 @@ func _process(delta: float) -> void:
 func _spawn_next() -> void:
 	wave_index += 1
 	if wave_index >= wave.size():
-		state = "victory"
-		gestures.enabled = true
-		sfx.play("victory", -2.0)
-		_buzz(120)
+		var reward := int(run_cfg.fight_shards)
+		shards += reward
+		hud.say("Комната очищена  +%d оск." % reward, Color(1.0, 0.85, 0.4), 1.3)
+		_room_cleared()
 		return
 	var id: String = wave[wave_index]
 	enemy = Enemy.new()
 	enemy.position = ENEMY_POS
 	add_child(enemy)
-	enemy.setup(id, cfg.enemies[id], _rng.randi())
+	enemy.setup(id, cfg.enemies[id], _run_rng.randi())
 	enemy.parry_window = float(p.parry_window)
 	enemy.windup_started.connect(_on_windup)
 	enemy.struck.connect(_on_struck)
@@ -212,12 +255,200 @@ func _spend(amount: float) -> void:
 	_since_spend = 0.0
 
 
+# ============================================================ забег
+
+func _next_room() -> void:
+	room_index += 1
+	if _prop != null:
+		_prop.queue_free()
+		_prop = null
+	if room_index >= rooms.size():
+		state = "victory"
+		sfx.play("victory", -2.0)
+		_buzz(120)
+		return
+	room = rooms[room_index]
+	visited[room.kind] = true
+	_prop_used = false
+	_prop_lid = null
+	_prop_glow = null
+	match str(room.kind):
+		"chest":
+			_make_chest()
+		"altar":
+			_make_altar()
+		"event":
+			_make_wisp()
+	state = "walk"
+	_walk_t = WALK_TIME
+	fade = 1.0
+
+
+## Дошли до комнаты: начинаем бой или ждём тапа по находке.
+func _arrive() -> void:
+	fade = 0.0
+	stats.rooms += 1
+	if str(room.kind) == "fight":
+		wave = room.wave
+		wave_index = -1
+		_spawn_next()
+		return
+	state = "room"
+	var title: String = KIND_NAMES[room.kind]
+	if str(room.kind) == "event":
+		title = str(room.event.text)
+	hud.say(title, Color(0.9, 0.88, 0.8), 2.5)
+
+
+func _room_cleared() -> void:
+	state = "cleared"
+	_between_t = CLEARED_DELAY
+	charging = false
+
+
+## Тап в мирной комнате: открыть сундук, коснуться алтаря, разобрать находку.
+func _use_room() -> void:
+	_prop_used = true
+	match str(room.kind):
+		"chest":
+			shards += int(room.shards)
+			gold += int(room.gold)
+			sfx.play("block", -4.0, 0.7)
+			hud.say("Осколки +%d   Золото +%d" % [int(room.shards), int(room.gold)], Color(1.0, 0.85, 0.4), 1.5)
+		"altar":
+			var heal := max_hp * float(room.heal)
+			hp = minf(max_hp, hp + heal)
+			sfx.play("stun", -4.0, 0.6)
+			hud.say("Свет Зари исцеляет: +%d" % roundi(heal), Color(0.6, 0.85, 1.0), 1.5)
+		"event":
+			_apply_event(room.event)
+	_buzz(30)
+	_room_cleared()
+
+
+func _apply_event(ev: Dictionary) -> void:
+	var value := float(ev.value)
+	match str(ev.effect):
+		"damage":
+			damage_mult += value
+		"heal":
+			hp = minf(max_hp, hp + value)
+		"gold":
+			gold += int(value)
+		"ash":
+			hp = maxf(1.0, hp - value)
+			shards += 5
+			hud.hurt_flash()
+	sfx.play("parry", -8.0, 0.8)
+	hud.say(str(ev.result), Color(0.95, 0.9, 0.7), 1.5)
+
+
+func _walk_offset() -> float:
+	if state != "walk":
+		return 0.0
+	var k := clampf(_walk_t / WALK_TIME, 0.0, 1.0)
+	return WALK_DISTANCE * k * k
+
+
+func _walk_bob() -> float:
+	if state != "walk":
+		return 0.0
+	return sin(_time * 11.0) * 0.035 * clampf(_walk_t / WALK_TIME * 2.0, 0.0, 1.0)
+
+
+func _make_chest() -> void:
+	_prop = Node3D.new()
+	_prop.position = ENEMY_POS + Vector3(0, 0, 0.3)
+	add_child(_prop)
+	var wood := _mat(Color(0.38, 0.24, 0.13), 0.85)
+	var iron := _mat(Color(0.75, 0.6, 0.3), 0.5)
+	_part(_prop, _box(Vector3(0.9, 0.5, 0.55)), Vector3(0, 0.25, 0), wood)
+	_part(_prop, _box(Vector3(0.94, 0.06, 0.59)), Vector3(0, 0.12, 0), iron)
+	_part(_prop, _box(Vector3(0.12, 0.16, 0.04)), Vector3(0, 0.42, 0.29), iron)
+	_prop_lid = Node3D.new()
+	_prop_lid.position = Vector3(0, 0.5, -0.275)
+	_prop.add_child(_prop_lid)
+	_part(_prop_lid, _box(Vector3(0.94, 0.18, 0.59)), Vector3(0, 0.09, 0.275), wood)
+	_part(_prop_lid, _box(Vector3(0.96, 0.05, 0.61)), Vector3(0, 0.18, 0.275), iron)
+	_prop_glow = _part(_prop, _box(Vector3(0.8, 0.04, 0.45)), Vector3(0, 0.49, 0), _glow_mat(Color(1.0, 0.8, 0.3)))
+	_prop_glow.visible = false
+
+
+func _make_altar() -> void:
+	_prop = Node3D.new()
+	_prop.position = ENEMY_POS
+	add_child(_prop)
+	var stone := _mat(Color(0.42, 0.42, 0.46), 0.9)
+	_part(_prop, _box(Vector3(1.0, 0.2, 1.0)), Vector3(0, 0.1, 0), stone)
+	_part(_prop, _box(Vector3(0.5, 0.9, 0.5)), Vector3(0, 0.65, 0), stone)
+	_part(_prop, _box(Vector3(0.75, 0.12, 0.75)), Vector3(0, 1.16, 0), stone)
+	var orb := SphereMesh.new()
+	orb.radius = 0.16
+	orb.height = 0.32
+	_prop_glow = _part(_prop, orb, Vector3(0, 1.5, 0), _glow_mat(Color(0.6, 0.85, 1.0)))
+	_prop_light(Color(0.55, 0.8, 1.0), Vector3(0, 1.6, 0.4))
+
+
+func _make_wisp() -> void:
+	_prop = Node3D.new()
+	_prop.position = ENEMY_POS
+	add_child(_prop)
+	var cloth := _mat(Color(0.3, 0.27, 0.25), 0.95)
+	# Свёрток у стены и огонёк над ним
+	_part(_prop, _box(Vector3(0.8, 0.22, 0.4)), Vector3(0, 0.11, 0), cloth)
+	_part(_prop, _box(Vector3(0.3, 0.3, 0.3)), Vector3(-0.3, 0.3, 0), cloth)
+	var orb := SphereMesh.new()
+	orb.radius = 0.09
+	orb.height = 0.18
+	_prop_glow = _part(_prop, orb, Vector3(0, 1.1, 0), _glow_mat(Color(1.0, 0.75, 0.4)))
+	_prop_light(Color(1.0, 0.7, 0.4), Vector3(0, 1.1, 0.3))
+
+
+func _prop_light(color: Color, pos: Vector3) -> void:
+	var light := OmniLight3D.new()
+	light.position = pos
+	light.light_color = color
+	light.light_energy = 1.4
+	light.omni_range = 3.5
+	light.shadow_enabled = false
+	_prop.add_child(light)
+
+
+func _glow_mat(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = c
+	return m
+
+
+func _animate_prop(delta: float) -> void:
+	if _prop == null:
+		return
+	match str(room.kind):
+		"chest":
+			if _prop_used:
+				_prop_lid.rotation.x = lerpf(_prop_lid.rotation.x, -1.9, 1.0 - exp(-9.0 * delta))
+				_prop_glow.visible = true
+		"altar", "event":
+			var base_y := 1.5 if str(room.kind) == "altar" else 1.1
+			_prop_glow.position.y = base_y + sin(_time * 2.2) * 0.06
+			var target := 0.3 if _prop_used else 1.0 + 0.12 * sin(_time * 5.0)
+			_prop_glow.scale = _prop_glow.scale.lerp(Vector3.ONE * target, 1.0 - exp(-6.0 * delta))
+
+
 # ============================================================ жесты
 
 func on_gesture(kind: String) -> void:
 	if state == "victory" or state == "defeat":
 		if kind == "tap":
 			get_tree().reload_current_scene()
+		return
+	if state == "room":
+		if kind == "tap":
+			_use_room()
+		return
+	if state != "fight":
+		charging = false
 		return
 	if enemy == null or not enemy.is_alive() or enemy.state == Enemy.State.APPEAR:
 		charging = false
@@ -279,7 +510,7 @@ func _attack(side: int, mult: float) -> void:
 	var stg := float(p.weak_stagger) if weak else float(p.off_stagger)
 	if enemy.state == Enemy.State.STUNNED:
 		dmg *= float(p.stun_mult)
-	dmg *= mult
+	dmg *= mult * damage_mult
 	stg *= mult
 	enemy.take_hit(dmg, stg)
 	stats.hits += 1
@@ -457,7 +688,7 @@ func _animate_view(delta: float) -> void:
 	var s := _shake * _shake * 0.06
 	camera.position = CAMERA_POS + Vector3(
 		_dodge_offset + _rng.randf_range(-s, s),
-		sin(_time * 1.6) * 0.008 + _rng.randf_range(-s, s), 0.0)
+		sin(_time * 1.6) * 0.008 + _rng.randf_range(-s, s) + _walk_bob(), _walk_offset())
 
 	# Мерцание факелов
 	for i in _torches.size():
