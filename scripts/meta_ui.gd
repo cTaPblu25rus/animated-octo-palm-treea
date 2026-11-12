@@ -5,6 +5,7 @@ extends CanvasLayer
 
 const Items := preload("res://scripts/items.gd")
 const Save := preload("res://scripts/save.gd")
+const Hero := preload("res://scripts/hero.gd")
 const GOLD := Color(0.96, 0.78, 0.36)
 const GOLD_DARK := Color(0.45, 0.3, 0.12)
 const INK := Color(0.07, 0.06, 0.09)
@@ -24,6 +25,10 @@ var _loot_box: VBoxContainer
 var _forge: PanelContainer
 var _forge_box: VBoxContainer
 var _forge_buttons := {}
+var _talents: PanelContainer
+var _talents_box: VBoxContainer
+var _talent_buttons := {}
+var _talent_sel := ""
 var _choice: PanelContainer
 var _choice_box: VBoxContainer
 var choice_kind := ""
@@ -52,6 +57,9 @@ func _ready() -> void:
 	_forge_box = _forge.get_child(0)
 	_choice = _panel()
 	_choice_box = _choice.get_child(0)
+	_talents = _panel()
+	_talents_box = _talents.get_child(0)
+	_talents_box.add_theme_constant_override("separation", 8)
 
 
 func is_loot_open() -> bool:
@@ -387,7 +395,7 @@ func show_forge() -> void:
 
 func hide_forge() -> void:
 	_forge.visible = false
-	_dim.visible = false
+	_dim.visible = _talents.visible
 
 
 func _rebuild_forge() -> void:
@@ -396,39 +404,29 @@ func _rebuild_forge() -> void:
 	_clear(_forge_box)
 	_forge_buttons.clear()
 	_forge_box.add_child(_label("КУЗНИЦА", 30, GOLD, true))
-	_forge_box.add_child(_label("Осколки: %d     Золото: %d" % [game.shards, game.gold], 17, PARCHMENT, true))
+	_forge_box.add_child(_label("Осколки: %d" % game.shards, 17, PARCHMENT, true))
 
 	_forge_box.add_child(_label("Оружие", 15, Color(PARCHMENT, 0.6), false))
 	_forge_box.add_child(_label("%s · сила %d" % [Items.title(cfg, w), Items.power(cfg, w)], 19, Items.color(cfg, w), false))
 	var max_lvl := int(cfg.sharpen.max)
 	var lvl := int(w.level)
-	var price := int(cfg.sharpen.gold) * (lvl + 1)
+	var price := int(cfg.sharpen.shards) * (lvl + 1)
 	var sharpen := _button("", 58)
 	if lvl >= max_lvl:
 		sharpen.text = "Заточка: предел"
 		sharpen.disabled = true
 	else:
-		sharpen.text = "Заточить +%d%% урона — %d золота" % [roundi(float(cfg.sharpen.bonus) * 100.0), price]
-		sharpen.disabled = game.gold < price
+		sharpen.text = "Заточить +%d%% урона — %d осколков" % [roundi(float(cfg.sharpen.bonus) * 100.0), price]
+		sharpen.disabled = game.shards < price
 	sharpen.pressed.connect(buy_sharpen)
 	_forge_box.add_child(sharpen)
 	_forge_buttons["sharpen"] = sharpen
-
-	_forge_box.add_child(_label("Улучшения героя", 15, Color(PARCHMENT, 0.6), false))
-	for id: String in cfg.upgrades:
-		var up: Dictionary = cfg.upgrades[id]
-		var have := int(Save.data.upgrades.get(id, 0))
-		var cost := int(up.shards) * (have + 1)
-		var b := _button("", 58)
-		if have >= int(up.max):
-			b.text = "%s %d/%d — предел" % [up.name, have, int(up.max)]
-			b.disabled = true
-		else:
-			b.text = "%s %d/%d · %s — %d оск." % [up.name, have, int(up.max), up.text, cost]
-			b.disabled = game.shards < cost
-		b.pressed.connect(buy_upgrade.bind(id))
-		_forge_box.add_child(b)
-		_forge_buttons[id] = b
+	_forge_box.add_child(_label("Героя усиливают таланты — они открываются за уровни.", 14, Color(PARCHMENT, 0.6), true))
+	var to_talents := _button("Таланты и умения", 58)
+	to_talents.pressed.connect(func() -> void:
+		hide_forge()
+		show_talents())
+	_forge_box.add_child(to_talents)
 
 	var back := _button("Назад", 60)
 	back.add_theme_font_size_override("font_size", 20)
@@ -437,35 +435,160 @@ func _rebuild_forge() -> void:
 	_fit(_forge)
 
 
-func buy_upgrade(id: String) -> bool:
-	var up: Dictionary = game.items.upgrades[id]
-	var have := int(Save.data.upgrades.get(id, 0))
-	var cost := int(up.shards) * (have + 1)
-	if have >= int(up.max) or game.shards < cost:
-		return false
-	game.shards -= cost
-	Save.data.upgrades[id] = have + 1
-	game.recalc()
-	game.persist()
-	game.sfx.play("parry", -6.0, 1.2)
-	if _forge.visible:
-		_rebuild_forge()
-	return true
-
-
 func buy_sharpen() -> bool:
 	var cfg: Dictionary = game.items
 	var w: Dictionary = Save.data.weapon
-	var price := int(cfg.sharpen.gold) * (int(w.level) + 1)
-	if int(w.level) >= int(cfg.sharpen.max) or game.gold < price:
+	var price := int(cfg.sharpen.shards) * (int(w.level) + 1)
+	if int(w.level) >= int(cfg.sharpen.max) or game.shards < price:
 		return false
-	game.gold -= price
+	game.shards -= price
 	w.level = int(w.level) + 1
 	game.recalc()
 	game.persist()
 	game.sfx.play("block", -4.0, 1.3)
 	if _forge.visible:
 		_rebuild_forge()
+	return true
+
+
+# ============================================================ таланты и умения
+
+func is_talents_open() -> bool:
+	return _talents.visible
+
+
+func show_talents() -> void:
+	_talents.visible = true
+	_dim.visible = true
+	_rebuild_talents()
+
+
+func hide_talents() -> void:
+	_talents.visible = false
+	_dim.visible = _forge.visible
+
+
+func _rebuild_talents() -> void:
+	var hc: Dictionary = game.hero_cfg
+	var level := int(Save.data.level)
+	_clear(_talents_box)
+	_talent_buttons.clear()
+	_talents_box.add_child(_label("ТАЛАНТЫ", 30, GOLD, true))
+	var maxed := level >= int(hc.max_level)
+	var need := Hero.need(hc, level)
+	_talents_box.add_child(_label("Уровень %d" % level + ("  ·  предел" if maxed else "  ·  опыт %d / %d" % [int(Save.data.xp), need]), 17, PARCHMENT, true))
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(412, 12)
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.value = 1.0 if maxed else float(Save.data.xp) / maxf(1.0, need)
+	bar.add_theme_stylebox_override("background", _box(INK, GOLD_DARK, 1, 6))
+	bar.add_theme_stylebox_override("fill", _box(GOLD, Color(0, 0, 0, 0), 0, 6))
+	_talents_box.add_child(bar)
+	var pts := Hero.points()
+	_talents_box.add_child(_label("Свободных очков: %d" % pts, 17, GOLD if pts > 0 else Color(PARCHMENT, 0.6), true))
+
+	# Три ветки столбцами; таланты изучаются сверху вниз
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 8)
+	_talents_box.add_child(cols)
+	for br: Dictionary in hc.branches:
+		var col := Color.html(str(br.color))
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 6)
+		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cols.add_child(v)
+		var head := _label(str(br.name), 17, col, true)
+		head.custom_minimum_size = Vector2(0, 0)
+		v.add_child(head)
+		for node: Dictionary in br.nodes:
+			var id := str(node.id)
+			var have := Hero.rank(id)
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(130, 58)
+			b.text = "%s\n%d / %d" % [node.name, have, int(node.max)]
+			b.add_theme_font_size_override("font_size", 13)
+			b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			var can := Hero.can_learn(hc, id)
+			var border := col if have > 0 else (GOLD if can else Color(GOLD_DARK, 0.5))
+			var bg := Color(col.darkened(0.7), 0.95) if have > 0 else Color(INK, 0.9)
+			if id == _talent_sel:
+				border = Color.WHITE
+			b.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.4) if have > 0 else (PARCHMENT if can else Color(PARCHMENT, 0.4)))
+			for st in ["normal", "hover", "pressed", "focus"]:
+				b.add_theme_stylebox_override(st, _box(bg, border, 3 if id == _talent_sel else 2, 10))
+			b.pressed.connect(select_talent.bind(id))
+			v.add_child(b)
+			_talent_buttons[id] = b
+
+	# Описание выбранного таланта и кнопка изучения
+	var sel := _talent_node(_talent_sel)
+	if sel.is_empty():
+		_talents_box.add_child(_label("Нажми на талант, чтобы прочитать описание", 14, Color(PARCHMENT, 0.6), true))
+	else:
+		_talents_box.add_child(_label("%s — %s" % [sel.name, sel.text], 15, PARCHMENT, true))
+		var learn := _button("Изучить (1 очко)", 56)
+		learn.disabled = not Hero.can_learn(hc, _talent_sel)
+		if Hero.rank(_talent_sel) >= int(sel.max):
+			learn.text = "Изучено полностью"
+		elif learn.disabled:
+			learn.text = "Нет очков" if pts <= 0 else "Сначала изучи предыдущий талант"
+		learn.pressed.connect(learn_talent.bind(_talent_sel))
+		_talents_box.add_child(learn)
+		_talent_buttons["learn"] = learn
+
+	# Умения
+	_talents_box.add_child(_label("Умения", 15, Color(PARCHMENT, 0.6), false))
+	for sk: Dictionary in hc.skills:
+		var open := Hero.skill_unlocked(sk)
+		var line := "%s — %s" % [sk.name, sk.text] if open else "%s — откроется на %d уровне" % [sk.name, int(sk.level)]
+		_talents_box.add_child(_label(line, 14, Color.html(str(sk.color)) if open else Color(PARCHMENT, 0.4), false))
+
+	var reset := _button("Сбросить таланты — %d осколков" % int(hc.respec_shards), 50)
+	reset.disabled = Hero.spent() == 0 or game.shards < int(hc.respec_shards)
+	reset.pressed.connect(reset_talents)
+	_talents_box.add_child(reset)
+	var back := _button("Назад", 58)
+	back.add_theme_font_size_override("font_size", 20)
+	back.pressed.connect(hide_talents)
+	_talents_box.add_child(back)
+	_fit(_talents)
+
+
+func _talent_node(id: String) -> Dictionary:
+	for br: Dictionary in game.hero_cfg.branches:
+		for node: Dictionary in br.nodes:
+			if str(node.id) == id:
+				return node
+	return {}
+
+
+func select_talent(id: String) -> void:
+	_talent_sel = id
+	_rebuild_talents()
+
+
+func learn_talent(id: String) -> bool:
+	if not Hero.learn(game.hero_cfg, id):
+		return false
+	game.recalc()
+	game.persist()
+	game.sfx.play("parry", -6.0, 1.2)
+	if _talents.visible:
+		_rebuild_talents()
+	return true
+
+
+func reset_talents() -> bool:
+	var cost := int(game.hero_cfg.respec_shards)
+	if Hero.spent() == 0 or game.shards < cost:
+		return false
+	game.shards -= cost
+	Hero.reset()
+	game.recalc()
+	game.persist()
+	if _talents.visible:
+		_rebuild_talents()
 	return true
 
 

@@ -120,32 +120,12 @@
 	"sharpen": {
 		"max": 5,
 		"bonus": 0.08,
-		"gold": 40
+		"shards": 15
 	},
-	"upgrades": {
-		"hp": {
-			"name": "Закалка",
-			"text": "+10 здоровья",
-			"max": 10,
-			"shards": 8
-		},
-		"damage": {
-			"name": "Выучка",
-			"text": "+5% урона",
-			"max": 10,
-			"shards": 10
-		},
-		"stamina": {
-			"name": "Выносливость",
-			"text": "+10 стойкости",
-			"max": 5,
-			"shards": 8
-		},
-		"parry": {
-			"name": "Чутьё",
-			"text": "Окно парирования +0,01 с",
-			"max": 5,
-			"shards": 12
-		}
+	"legacy_upgrades": {
+		"hp": 8,
+		"damage": 10,
+		"stamina": 8,
+		"parry": 12
 	}
 }

@@ -7,6 +7,7 @@ extends Node
 const Enemy := preload("res://scripts/enemy.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
+const Hero := preload("res://scripts/hero.gd")
 const STAGE := "dev_test_stage"
 
 var game: Node
@@ -157,16 +158,59 @@ func _run() -> void:
 	_check(game.meta_ui.is_forge_open(), "кузница открывается")
 	await _wait(0.2)
 	await _shot("forge")
-	var max_hp: float = game.max_hp
-	var before_shards: int = game.shards
-	game.meta_ui._forge_buttons["hp"].pressed.emit()
-	_check(is_equal_approx(game.max_hp, max_hp + 10.0) and game.shards == before_shards - 8, "улучшение «Закалка»: +10 здоровья за 8 осколков")
 	var dmg: float = float(game.p.attack_damage)
-	var gold2: int = game.gold
+	var before_shards: int = game.shards
 	game.meta_ui._forge_buttons["sharpen"].pressed.emit()
-	_check(int(Save.data.weapon.level) == 1 and float(game.p.attack_damage) > dmg and game.gold == gold2 - 40, "заточка: +1 уровень за 40 золота")
+	_check(int(Save.data.weapon.level) == 1 and float(game.p.attack_damage) > dmg and game.shards == before_shards - 15, "заточка: +1 уровень за 15 осколков")
+	game.meta_ui.hide_forge()
+
+	# Уровни, таланты и умения
+	dev._set_open(true)
+	_check(int(Save.data.level) >= 1 and Hero.points() == int(Save.data.level) - 1, "очки талантов = уровень − 1")
+	var lvl0: int = int(Save.data.level)
+	_press("levelup")
+	_check(int(Save.data.level) == lvl0 + 1, "+1 уровень героя")
+	while int(Save.data.level) < 10:
+		_press("levelup")
+	_check(int(Save.data.level) == 10 and Hero.points() == 9, "уровень 10 даёт 9 очков талантов")
+	_press("talents")
+	_check(game.meta_ui.is_talents_open(), "окно талантов открывается")
+	_check(not Hero.can_learn(game.hero_cfg, "d2"), "второй талант ветки закрыт, пока не изучен первый")
+	var max_hp: float = game.max_hp
+	game.meta_ui._talent_buttons["d1"].pressed.emit()
+	_check(game.meta_ui._talent_sel == "d1", "талант выбирается нажатием")
+	game.meta_ui._talent_buttons["learn"].pressed.emit()
+	_check(Hero.rank("d1") == 1 and is_equal_approx(game.max_hp, max_hp + 12.0) and Hero.points() == 8, "«Закалка»: +12 здоровья за очко")
+	_check(Hero.can_learn(game.hero_cfg, "d2"), "после первого таланта открывается второй")
+	var dmg2: float = float(game.p.attack_damage)
+	game.meta_ui.learn_talent("s1")
+	_check(float(game.p.attack_damage) > dmg2, "«Тяжёлая рука» увеличивает урон")
+	await _wait(0.2)
+	await _shot("talents")
+	game.shards = 50
+	_check(game.meta_ui.reset_talents() and Hero.spent() == 0 and game.shards == 30 and is_equal_approx(game.max_hp, max_hp), "сброс талантов за 20 осколков")
+	game.meta_ui.hide_talents()
+
+	# Умения в бою
+	game.dev_goto_room(0)
+	await _until(func() -> bool: return game.state == "fight" and game.enemy != null and game.enemy.state != Enemy.State.APPEAR)
+	_check(game.skill_ready(0) and game.skill_ready(1) and game.skill_ready(2), "на 10 уровне открыты все три умения")
+	var stagger0: float = game.enemy.stagger
+	game.use_skill(0)
+	_check(game.enemy.stagger > stagger0 and game.skill_cd[0] > 0.0 and not game.skill_ready(0), "удар щитом бьёт по стойкости и уходит на перезарядку")
+	var ehp: float = game.enemy.hp
+	game.use_skill(1)
+	await _wait(0.8)
+	_check(game.enemy == null or game.enemy.hp < ehp - 15.0, "вихрь наносит серию ударов")
+	game.hp = 40.0
+	game.use_skill(2)
+	_check(is_equal_approx(game.hp, 40.0 + game.max_hp * 0.25), "свет зари лечит четверть здоровья")
+	await _shot("skills")
+	dev._set_open(true)
+	_press("cooldowns")
+	_check(is_zero_approx(game.skill_cd[0]), "сброс перезарядки умений")
 	_press("wipe")
-	_check(game.shards == 0 and str(Save.data.weapon.id) == "guard_sword" and is_equal_approx(game.max_hp, 100.0), "сброс сохранения")
+	_check(game.shards == 0 and str(Save.data.weapon.id) == "guard_sword" and is_equal_approx(game.max_hp, 100.0) and int(Save.data.level) == 1, "сброс сохранения")
 	game.meta_ui.hide_forge()
 
 	# Дары и лавка

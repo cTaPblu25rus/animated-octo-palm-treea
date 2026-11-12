@@ -128,6 +128,12 @@ func _process(delta: float) -> void:
 	if e.state == Enemy.State.WINDUP:
 		_react(e)
 		return
+	# Умения, если открыты: лечение при низком здоровье, вихрь по открытому врагу
+	if game.skill_ready(2) and game.hp < game.max_hp * 0.6:
+		game.use_skill(2)
+	if game.skill_ready(1) and e.is_open():
+		game.use_skill(1)
+		return
 	if game.attack_cd > 0.0 or game.stamina < 30.0:
 		return
 	var break_guard: bool = e.guarded() and e.state_t < e.state_dur - 1.0
@@ -144,6 +150,12 @@ func _react(e: Enemy) -> void:
 		return
 	var window: float = float(game.p.parry_window)
 	var kind: String = REACTIONS[_reaction % REACTIONS.size()]
+	if kind == "block" and game.skill_ready(0) and int(game.stats.blocks) > 0:
+		# Удар щитом прерывает замах
+		_reacted_windup = true
+		_reaction += 1
+		game.use_skill(0)
+		return
 	if e.combo > 1 or game.stamina < 40.0:
 		kind = "parry"      # в серии босса и без сил надёжно только парирование
 	var lead := window * 0.5 if kind == "parry" else 0.35
@@ -212,6 +224,8 @@ func _finish() -> void:
 	for kind: String in must:
 		if not game.visited.has(kind):
 			missing.append("комната " + kind)
+	if int(Save.data.level) >= 6 and int(s.skills) == 0:
+		missing.append("умения открыты, но не применялись")
 	if int(s.boons) == 0:
 		missing.append("не выбран ни один дар")
 	if int(s.forks) == 0:
@@ -226,6 +240,7 @@ func _finish() -> void:
 	for r: Dictionary in game.rooms:
 		path.append(str(r.kind) + ("(" + ",".join(r.wave) + ")" if r.has("wave") else ""))
 	print("BOT: путь: ", " → ".join(path))
+	print("BOT: уровень %d, опыт за забег %d, умений применено %d" % [int(Save.data.level), game.run_xp, int(s.skills)])
 	if missing.is_empty():
 		print("BOT: ЗАБЕГ ПРОЙДЕН (сид %d, осколки %d, золото %d), все приёмы и типы комнат сработали" % [
 			game.run_seed, game.shards, game.gold])
