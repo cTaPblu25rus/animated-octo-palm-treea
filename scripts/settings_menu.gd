@@ -113,6 +113,9 @@ func _build() -> void:
 	resume.add_theme_font_size_override("font_size", 22)
 	resume.pressed.connect(set_open.bind(false))
 	v.add_child(resume)
+	var forge := _button("Кузница: улучшения и заточка", 60)
+	forge.pressed.connect(func() -> void: game.meta_ui.show_forge())
+	v.add_child(forge)
 	var restart := _button("Новый забег", 52)
 	restart.pressed.connect(func() -> void:
 		Settings.save()

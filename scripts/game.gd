@@ -12,6 +12,11 @@ const Run := preload("res://scripts/run.gd")
 const DevMenu := preload("res://scripts/dev_menu.gd")
 const Settings := preload("res://scripts/settings.gd")
 const SettingsMenu := preload("res://scripts/settings_menu.gd")
+const Save := preload("res://scripts/save.gd")
+const Items := preload("res://scripts/items.gd")
+const MetaUi := preload("res://scripts/meta_ui.gd")
+const ITEMS_PATH := "res://data/items.json"
+const HERO_MODELS := "res://assets/kaykit/hero/"
 
 const DUNGEON := "res://assets/kaykit/dungeon/"
 const HERO_SWORD := preload("res://assets/kaykit/hero/sword_1handed.gltf")
@@ -84,11 +89,16 @@ var _run_rng := RandomNumberGenerator.new()
 
 ## Счётчики для автоигрока и итогового экрана.
 var stats := {"hits": 0, "weak_hits": 0, "parries": 0, "blocks": 0, "dodges": 0,
-	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "taken": 0.0, "hurt": 0, "kills": 0}
+	"charged": 0, "stuns": 0, "rooms": 0, "boss": 0, "drops": 0, "taken_loot": 0, "taken": 0.0, "hurt": 0, "kills": 0}
 
 var gestures: Node
 var dev_menu: CanvasLayer
 var settings_menu: CanvasLayer
+var meta_ui: CanvasLayer
+var items: Dictionary = {}      # data/items.json
+var weapon: Dictionary = {}     # вид текущего оружия из items.weapons
+var _sword_model: Node3D
+var _loot_then := ""            # что делать после выбора добычи: cleared | cutscene
 var style: Dictionary = {}      # параметры текущего стиля графики, читает HUD
 var _lantern: OmniLight3D
 var hud: CanvasLayer
@@ -116,11 +126,12 @@ func _ready() -> void:
 	autoplay = OS.get_cmdline_user_args().has("--autoplay")
 	_rng.randomize()
 	cfg = _load_json(DATA_PATH)
-	p = cfg.player
-	max_hp = float(p.hp)
-	hp = max_hp
-	max_stamina = float(p.stamina)
-	stamina = max_stamina
+	items = _load_json(ITEMS_PATH)
+	var testing := autoplay or OS.get_cmdline_user_args().has("--devtest")
+	Save.load_once(testing)
+	shards = int(Save.data.shards)
+	gold = int(Save.data.gold)
+	Save.data.runs = int(Save.data.runs) + 1
 	run_cfg = _load_json(RUN_PATH)
 	run_seed = 1 if autoplay else int(_rng.randi() % 1000000)
 	if int(DevMenu.flags().seed) >= 0 and not autoplay:
@@ -147,6 +158,13 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
+	meta_ui = MetaUi.new()
+	meta_ui.game = self
+	add_child(meta_ui)
+	meta_ui.loot_chosen.connect(_on_loot_chosen)
+	recalc()
+	hp = max_hp
+	stamina = max_stamina
 	settings_menu = SettingsMenu.new()
 	settings_menu.game = self
 	add_child(settings_menu)
@@ -255,6 +273,8 @@ func _on_phase(_index: int, title: String) -> void:
 
 func _on_died() -> void:
 	stats.kills += 1
+	if str(Save.data.weapon.affix) == "vampire":
+		hp = minf(max_hp, hp + 6.0)
 	sfx.play("death", -2.0)
 	enemy.queue_free()
 	enemy = null
@@ -359,15 +379,106 @@ func _arrive() -> void:
 
 
 func _room_cleared() -> void:
-	if str(room.kind) == "boss":
+	charging = false
+	var kind := str(room.kind)
+	if kind == "boss":
+		stats.boss = 1
+		Save.data.wins = int(Save.data.wins) + 1
+	persist()
+	var then := "cutscene" if kind == "boss" else "cleared"
+	if _roll_drop(kind):
+		_loot_then = then
+		state = "loot"
+		return
+	_finish_room(then)
+
+
+func _finish_room(then: String) -> void:
+	if then == "cutscene":
 		state = "cutscene"
 		cut_t = 0.0
-		charging = false
-		stats.boss = 1
 		return
 	state = "cleared"
 	_between_t = CLEARED_DELAY
-	charging = false
+
+
+# ============================================================ добыча и улучшения
+
+## Выпало ли оружие за комнату. Если да — показывает карточку добычи.
+func _roll_drop(kind: String) -> bool:
+	var chances: Dictionary = items.drop_chance
+	var key := kind
+	if kind == "fight" and room_index == rooms.size() - 2:
+		key = "final"
+	if not chances.has(key) or _run_rng.randf() >= float(chances[key]):
+		return false
+	var depth := float(room_index) / maxf(1.0, rooms.size() - 1)
+	offer_loot(Items.roll(items, _run_rng, depth, 2 if kind == "boss" else 0))
+	return true
+
+
+func offer_loot(w: Dictionary) -> void:
+	stats.drops += 1
+	sfx.play("victory", -8.0, 1.5)
+	meta_ui.show_loot(w)
+
+
+func _on_loot_chosen(take: bool) -> void:
+	var w: Dictionary = meta_ui.offered
+	if take:
+		Save.data.weapon = w
+		recalc()
+		hud.say("В руке: " + Items.title(items, w), Items.color(items, w), 1.6)
+		stats.taken_loot += 1
+	else:
+		var n := Items.salvage(items, w)
+		shards += n
+		hud.say("Разобрано: +%d оск." % n, Color(0.6, 0.85, 1.0), 1.4)
+	persist()
+	if state == "loot":
+		_finish_room(_loot_then)
+
+
+## Пересчитать параметры героя из базовых (combat.json), улучшений и оружия.
+func recalc() -> void:
+	var up: Dictionary = Save.data.upgrades
+	var w: Dictionary = Save.data.weapon
+	if not items.weapons.has(w.id):
+		w = Save.defaults().weapon
+		Save.data.weapon = w
+	weapon = items.weapons[w.id]
+	p = cfg.player.duplicate()
+	var dmg := Items.damage_mult(items, w) * (1.0 + 0.05 * int(up.damage))
+	p.attack_damage = float(p.attack_damage) * dmg * (1.2 if str(w.affix) == "keen" else 1.0)
+	p.attack_off_damage = float(p.attack_off_damage) * dmg
+	p.attack_recovery = float(p.attack_recovery) * float(weapon.speed)
+	p.attack_cost = float(p.attack_cost) * float(weapon.cost) * (0.75 if str(w.affix) == "light" else 1.0)
+	p.weak_stagger = float(p.weak_stagger) * float(weapon.stagger)
+	p.off_stagger = float(p.off_stagger) * float(weapon.stagger)
+	p.parry_stagger = float(p.parry_stagger) * (1.4 if str(w.affix) == "breaker" else 1.0)
+	p.charge_mult = float(p.charge_mult) * float(weapon.charge)
+	p.parry_window = float(p.parry_window) + 0.01 * int(up.parry)
+	var old_max := max_hp
+	max_hp = float(p.hp) + 10.0 * int(up.hp)
+	hp = minf(max_hp, hp + maxf(0.0, max_hp - old_max))
+	max_stamina = float(p.stamina) + 10.0 * int(up.stamina)
+	stamina = minf(stamina, max_stamina)
+	if enemy != null:
+		enemy.parry_window = float(p.parry_window)
+	# Модель оружия в руке
+	if _sword_model != null:
+		_sword_model.queue_free()
+	var scene: PackedScene = load(HERO_MODELS + str(weapon.model) + ".gltf")
+	_sword_model = scene.instantiate()
+	_sword_model.scale = Vector3.ONE * float(weapon.scale)
+	_sword.add_child(_sword_model)
+
+
+## Записать осколки и золото в сохранение.
+func persist() -> void:
+	Save.data.shards = shards
+	Save.data.gold = gold
+	Save.save()
 
 
 ## Тап в мирной комнате: открыть сундук, коснуться алтаря, разобрать находку.
@@ -450,6 +561,7 @@ func apply_style() -> void:
 # ============================================================ для меню разработчика
 
 func _dev_clear() -> void:
+	meta_ui.cancel_loot()
 	if enemy != null:
 		enemy.queue_free()
 		enemy = null
@@ -730,9 +842,6 @@ func _build_camera() -> void:
 	_sword.position = SWORD_POS
 	_sword.rotation = SWORD_REST
 	camera.add_child(_sword)
-	var sword_model: Node3D = HERO_SWORD.instantiate()
-	sword_model.scale = Vector3.ONE * 0.36
-	_sword.add_child(sword_model)
 
 	_shield = Node3D.new()
 	_shield.position = SHIELD_REST
