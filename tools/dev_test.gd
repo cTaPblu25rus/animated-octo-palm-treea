@@ -5,6 +5,8 @@
 extends Node
 
 const Enemy := preload("res://scripts/enemy.gd")
+const Save := preload("res://scripts/save.gd")
+const Items := preload("res://scripts/items.gd")
 const STAGE := "dev_test_stage"
 
 var game: Node
@@ -88,8 +90,10 @@ func _run() -> void:
 	_press("kill")
 	_check(not game.enemy.is_alive(), "убить босса")
 	dev._set_open(false)
-	await _until(func() -> bool: return game.state == "cutscene")
-	_check(true, "после босса начинается кат-сцена")
+	await _until(func() -> bool: return game.state == "loot")
+	_check(int(game.meta_ui.offered.rarity) >= 2, "с босса выпадает эпическое или легендарное оружие")
+	game.meta_ui.choose(false)
+	_check(game.state == "cutscene", "после добычи с босса начинается кат-сцена")
 
 	# Кат-сцена с кнопки и экран итога
 	dev._set_open(true)
@@ -123,6 +127,45 @@ func _run() -> void:
 	_check(dev._bot != null, "автоигрок включается из меню")
 	_press("bot")
 	_check(dev._bot == null, "автоигрок выключается")
+
+	# Добыча: взять легендарное, разобрать обычное
+	dev._set_open(true)
+	_press("wipe")
+	_press("legend")
+	_check(game.meta_ui.is_loot_open() and int(game.meta_ui.offered.rarity) == 3, "карточка легендарного оружия")
+	await _wait(0.3)
+	await _shot("loot")
+	var offered: Dictionary = game.meta_ui.offered
+	game.meta_ui.choose(true)
+	_check(Save.data.weapon == offered and not game.meta_ui.is_loot_open(), "взять оружие: оно в руке")
+	_check(is_equal_approx(float(game.p.attack_damage),
+		float(game.cfg.player.attack_damage) * Items.damage_mult(game.items, offered) * (1.2 if str(offered.affix) == "keen" else 1.0)),
+		"урон пересчитан под новое оружие")
+	dev._set_open(true)
+	_press("drop")
+	var shards: int = game.shards
+	var salvage := Items.salvage(game.items, game.meta_ui.offered)
+	game.meta_ui.choose(false)
+	_check(game.shards == shards + salvage and Save.data.weapon == offered, "разобрать: осколки начислены, оружие прежнее")
+
+	# Кузница: улучшения и заточка
+	dev._set_open(true)
+	_press("money")
+	_press("forge")
+	_check(game.meta_ui.is_forge_open(), "кузница открывается")
+	await _wait(0.2)
+	await _shot("forge")
+	var max_hp: float = game.max_hp
+	var before_shards: int = game.shards
+	game.meta_ui._forge_buttons["hp"].pressed.emit()
+	_check(is_equal_approx(game.max_hp, max_hp + 10.0) and game.shards == before_shards - 8, "улучшение «Закалка»: +10 здоровья за 8 осколков")
+	var dmg: float = float(game.p.attack_damage)
+	var gold2: int = game.gold
+	game.meta_ui._forge_buttons["sharpen"].pressed.emit()
+	_check(int(Save.data.weapon.level) == 1 and float(game.p.attack_damage) > dmg and game.gold == gold2 - 40, "заточка: +1 уровень за 40 золота")
+	_press("wipe")
+	_check(game.shards == 0 and str(Save.data.weapon.id) == "guard_sword" and is_equal_approx(game.max_hp, 100.0), "сброс сохранения")
+	game.meta_ui.hide_forge()
 
 	# Новый забег с выбранным сидом: проверка продолжится после перезагрузки
 	dev._seed_pick = 12345

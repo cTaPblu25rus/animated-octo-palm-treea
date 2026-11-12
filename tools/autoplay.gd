@@ -9,6 +9,8 @@
 extends Node
 
 const Enemy := preload("res://scripts/enemy.gd")
+const Save := preload("res://scripts/save.gd")
+const Items := preload("res://scripts/items.gd")
 const TIMEOUT := 420.0
 const REACTIONS := ["parry", "block", "parry", "dodge"]
 
@@ -58,6 +60,14 @@ func _process(delta: float) -> void:
 		_fail("страж пал" if game.state == "defeat" else "таймаут")
 		return
 	_run_queue(delta)
+	if game.state == "loot":
+		# Берём оружие, если оно сильнее текущего, иначе разбираем
+		_room_t += delta
+		if _room_t > 0.8:
+			_room_t = 0.0
+			var cur: Dictionary = Save.data.weapon
+			game.meta_ui.choose(Items.power(game.items, game.meta_ui.offered) > Items.power(game.items, cur))
+		return
 	if game.state == "room":
 		_room_t += delta
 		if _room_t > 0.8:
@@ -160,6 +170,8 @@ func _finish() -> void:
 	for kind in ["fight", "chest", "altar", "event"]:
 		if not game.visited.has(kind):
 			missing.append("комната " + kind)
+	if int(s.drops) == 0:
+		missing.append("не выпало оружие")
 	if int(s.boss) == 0:
 		missing.append("босс не побеждён")
 	if int(s.rooms) != game.rooms.size():

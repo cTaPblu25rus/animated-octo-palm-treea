@@ -5,6 +5,8 @@
 extends CanvasLayer
 
 const Enemy := preload("res://scripts/enemy.gd")
+const Save := preload("res://scripts/save.gd")
+const Items := preload("res://scripts/items.gd")
 
 const GOLD := Color(0.96, 0.78, 0.36)
 const GOLD_DARK := Color(0.45, 0.3, 0.12)
@@ -115,7 +117,7 @@ func _on_draw() -> void:
 	if _hurt > 0.0:
 		_canvas.draw_texture_rect(_vignette, Rect2(Vector2.ZERO, size), false, Color(1.0, 0.1, 0.05, _hurt))
 
-	if not cinematic and game.state != "victory":
+	if not cinematic and game.state != "victory" and game.state != "loot":
 		_draw_path(w)
 		_draw_purse(w)
 		if enemy != null and enemy.state != Enemy.State.DEAD:
@@ -261,7 +263,10 @@ func _draw_player(w: float, h: float, enemy: Enemy) -> void:
 	_canvas.draw_circle(hc, 17, INK)
 	_heart(hc + Vector2(0, 1), 10.0 + (1.2 * sin(_time * 8.0) if low else 0.0), HP_RED)
 
-	_fancy_bar(Rect2(px, hy + 30.0, pw * 0.72, 10), game.stamina / game.max_stamina, 0.0, STAMINA)
+	_fancy_bar(Rect2(px, hy + 30.0, pw * 0.5, 10), game.stamina / game.max_stamina, 0.0, STAMINA)
+	# Оружие в руке: название цветом редкости
+	var wpn: Dictionary = Save.data.weapon
+	_text_right(Items.title(game.items, wpn), Vector2(px + pw, hy + 41.0), 14, Items.color(game.items, wpn))
 
 	if game.block_t > 0.0:
 		_chip(Rect2(w * 0.5 - 42, h - 40, 84, 26))
@@ -372,6 +377,7 @@ func _draw_result(w: float, h: float) -> void:
 		y += 30
 	_text("Сид забега: %d" % game.run_seed, Vector2(cx, panel.end.y - 18), 12, Color(PARCHMENT, 0.45 * a))
 	if _result_t > 1.6:
+		_text("II — кузница и настройки", Vector2(cx, panel.end.y + 76), 15, Color(GOLD, 0.8))
 		_text("Тап — новый забег", Vector2(cx, panel.end.y + 44), 21, Color(PARCHMENT, 0.6 + 0.4 * sin(_time * 4.0)))
 
 

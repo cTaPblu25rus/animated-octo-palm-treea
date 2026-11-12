@@ -12,6 +12,8 @@ extends CanvasLayer
 
 const Enemy := preload("res://scripts/enemy.gd")
 const Settings := preload("res://scripts/settings.gd")
+const Save := preload("res://scripts/save.gd")
+const Items := preload("res://scripts/items.gd")
 const SPEEDS := [1.0, 0.25, 0.5, 2.0, 4.0]
 const SOUNDS := ["swing", "hit", "crit", "parry", "block", "hurt", "windup", "stun", "dodge", "death", "victory"]
 const META := "dev_menu"
@@ -125,6 +127,11 @@ func _build() -> void:
 	_add("hurt", _hurt, "−30 здоровья")
 	_add("money", _money, "+100 золота и осколков")
 
+	_add("drop", _drop, "Выпадение оружия")
+	_add("legend", _drop_legend, "Легендарное оружие")
+	_add("forge", _forge, "Открыть кузницу")
+	_add("wipe", _wipe, "Сбросить сохранение")
+
 	_section("Бой")
 	_add("kill", _kill, "Убить врага")
 	_add("stun", _stun, "Оглушить врага")
@@ -182,6 +189,8 @@ func _add(key: String, action: Callable, text: String = "") -> void:
 
 
 func _set_open(open: bool) -> void:
+	if not open:
+		game.meta_ui.hide_forge()
 	_panel.visible = open
 	_toggle.visible = not open
 	game.gestures.enabled = not open
@@ -262,6 +271,28 @@ func _hurt() -> void:
 func _money() -> void:
 	game.gold += 100
 	game.shards += 100
+
+
+func _drop() -> void:
+	_set_open(false)
+	game.offer_loot(Items.roll(game.items, RandomNumberGenerator.new(), 0.5))
+
+
+func _drop_legend() -> void:
+	_set_open(false)
+	game.offer_loot(Items.roll(game.items, RandomNumberGenerator.new(), 1.0, 3))
+
+
+func _forge() -> void:
+	_set_open(false)
+	game.meta_ui.show_forge()
+
+
+func _wipe() -> void:
+	Save.reset()
+	game.shards = 0
+	game.gold = 0
+	game.recalc()
 
 
 func _kill() -> void:
