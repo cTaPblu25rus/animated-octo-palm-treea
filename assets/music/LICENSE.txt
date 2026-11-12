@@ -1,0 +1,11 @@
+Музыка с OpenGameArt.org, все треки под лицензией CC0 (общественное достояние).
+Перекодированы в OGG Vorbis с выравниванием громкости.
+
+menu.ogg     — «Übermensch [Main Menu]» (Epic Main Menu Theme ~ Loop), cynicmusic
+               https://opengameart.org/content/epic-main-menu-theme-loop
+dungeon.ogg  — «Great Labyrinth (Orchestral dungeon music)»
+               https://opengameart.org/content/great-labyrinthorchestral-dungeon-music
+fight.ogg    — «Battle Theme A»
+               https://opengameart.org/content/battle-theme-a
+boss.ogg     — «Epic Boss Battle [Seamlessly Looping]», Juhani Junkala
+               https://opengameart.org/content/boss-battle-music

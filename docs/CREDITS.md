@@ -12,5 +12,16 @@
 
 | Poly Haven: Castle Brick 07, Cobblestone Floor 08 | Poly Haven | камень стен и пола в реалистичном стиле | https://polyhaven.com/a/castle_brick_07 · https://polyhaven.com/a/cobblestone_floor_08 |
 
+## Музыка
+Четыре трека с OpenGameArt.org, все под CC0: тема меню (cynicmusic), подземелье
+(«Great Labyrinth»), бой («Battle Theme A»), босс (Juhani Junkala). Ссылки —
+в `assets/music/LICENSE.txt`.
+
+## Озвучка
+Реплики в `assets/voice/` синтезированы программой [Piper](https://github.com/OHF-Voice/piper1-gpl)
+голосами `ru_RU-dmitri-medium` (рассказчик) и `ru_RU-denis-medium` (босс, понижен и с эхом).
+Оба голоса обучены на датасете с лицензией CC0. Тексты — в `data/voice.json`,
+пересборка: `python3 tools/make_voice.py <папка с моделями>`.
+
 Это временная графика для прототипа. Свой визуальный стиль (см. `docs/GDD.md`,
 раздел «Арт») делаем позже и заменяем модели по одной.

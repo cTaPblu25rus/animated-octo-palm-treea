@@ -89,7 +89,7 @@ func _build() -> void:
 		v.add_child(b)
 		_style_buttons[id] = b
 
-	v.add_child(_label("Громкость", 17, Color(PARCHMENT, 0.7), false))
+	v.add_child(_label("Общая громкость", 17, Color(PARCHMENT, 0.7), false))
 	_volume = HSlider.new()
 	_volume.min_value = 0.0
 	_volume.max_value = 1.0
@@ -100,6 +100,18 @@ func _build() -> void:
 		Settings.volume = val
 		Settings.apply_volume())
 	v.add_child(_volume)
+
+	v.add_child(_label("Музыка", 17, Color(PARCHMENT, 0.7), false))
+	var music := HSlider.new()
+	music.min_value = 0.0
+	music.max_value = 1.0
+	music.step = 0.05
+	music.value = Settings.music
+	music.custom_minimum_size = Vector2(0, 44)
+	music.value_changed.connect(func(val: float) -> void:
+		Settings.music = val
+		Settings.apply_volume())
+	v.add_child(music)
 
 	_vibro = _button("", 56)
 	_vibro.pressed.connect(func() -> void:

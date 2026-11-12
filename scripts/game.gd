@@ -16,6 +16,9 @@ const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const MetaUi := preload("res://scripts/meta_ui.gd")
 const PixelShader := preload("res://shaders/pixel.gdshader")
+const Voice := preload("res://scripts/voice.gd")
+const Title := preload("res://scripts/title.gd")
+const Music := preload("res://scripts/music.gd")
 const ITEMS_PATH := "res://data/items.json"
 const HERO_MODELS := "res://assets/kaykit/hero/"
 
@@ -96,13 +99,18 @@ var gestures: Node
 var dev_menu: CanvasLayer
 var settings_menu: CanvasLayer
 var meta_ui: CanvasLayer
+var voice: Node
+var music: Node
+var title: CanvasLayer
+var cut_total := CUT_TIME        # длина кат-сцены: подстраивается под озвучку
+var _title_boss: Enemy
 var items: Dictionary = {}      # data/items.json
 var weapon: Dictionary = {}     # вид текущего оружия из items.weapons
 var _sword_model: Node3D
 var _last_struck_side := 0
 var _chip_pool: Array[CPUParticles3D] = []
 var _chip_next := 0
-var _hitstop_base := -1.0
+var _hitstop_until := 0          # момент (мс), до которого враг «заморожен»
 var _loot_then := ""            # что делать после выбора добычи: cleared | cutscene
 var style: Dictionary = {}      # параметры текущего стиля графики, читает HUD
 var _lantern: OmniLight3D
@@ -152,6 +160,9 @@ func _ready() -> void:
 	rooms = Run.generate(run_cfg, run_seed)
 	_run_rng.seed = run_seed
 
+	if not autoplay:
+		Engine.time_scale = 1.0     # страховка: скорость не должна «застрять» между сценами
+	Music.ensure_bus()
 	Settings.load_once()
 	Settings.apply_volume()
 	for a in OS.get_cmdline_user_args():
@@ -159,6 +170,10 @@ func _ready() -> void:
 			Settings.style = a.trim_prefix("--style=")
 	style = Settings.current()
 	sfx = Sfx.new()
+	voice = Voice.new()
+	add_child(voice)
+	music = Music.new()
+	add_child(music)
 	add_child(sfx)
 	_build_room()
 	_build_camera()
@@ -195,7 +210,19 @@ func _ready() -> void:
 		dev_menu = DevMenu.new()
 		dev_menu.game = self
 		add_child(dev_menu)
-	_next_room()
+	_spawn_embers()
+	var skip_title := testing or Engine.has_meta("title_seen") or OS.get_cmdline_user_args().has("--no-title")
+	if OS.get_cmdline_user_args().has("--title"):
+		skip_title = false
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--titleshots="):
+			var shooter: Node = load("res://tools/title_shot.gd").new()
+			shooter.dir = a.trim_prefix("--titleshots=")
+			add_child(shooter)
+	if skip_title:
+		start_run()
+	else:
+		_show_title()
 
 	if OS.get_cmdline_user_args().has("--devtest"):
 		var test: Node = load("res://tools/dev_test.gd").new()
@@ -220,6 +247,8 @@ func _load_json(path: String) -> Dictionary:
 
 func _process(delta: float) -> void:
 	_time += delta
+	_update_hitstop()
+	_update_music()
 	attack_cd = maxf(0.0, attack_cd - delta)
 	block_t = maxf(0.0, block_t - delta)
 	dodge_t = maxf(0.0, dodge_t - delta)
@@ -272,7 +301,9 @@ func _spawn_next() -> void:
 	enemy.died.connect(_on_died)
 	enemy.phase_changed.connect(_on_phase)
 	state = "fight"
-	if not enemy.is_boss:
+	if enemy.is_boss:
+		voice.say_sequence(["boss_intro"], 0.0, 0.6)
+	else:
 		hud.say(enemy.display_name, Color(0.9, 0.85, 0.8), 1.4)
 
 
@@ -286,9 +317,10 @@ func _on_stunned() -> void:
 	hud.say("Оглушён! Бей!", Color(1.0, 0.9, 0.3), 1.2)
 
 
-func _on_phase(_index: int, title: String) -> void:
+func _on_phase(index: int, phase_title: String) -> void:
 	sfx.play("death", -3.0, 1.4)
-	hud.say(title, Color(1.0, 0.35, 0.25), 1.8)
+	hud.say(phase_title, Color(1.0, 0.35, 0.25), 1.8)
+	voice.say("boss_phase%d" % (index + 1))
 	_shake = maxf(_shake, 0.9)
 	_buzz(150)
 
@@ -348,6 +380,7 @@ func _take_damage(dmg: float) -> void:
 	if hp <= 0.0:
 		state = "defeat"
 		charging = false
+		voice.say("defeat")
 
 
 func _spend(amount: float) -> void:
@@ -358,6 +391,61 @@ func _spend(amount: float) -> void:
 
 
 # ============================================================ забег
+
+## Заставка: босс встаёт из земли в глубине коридора, поверх — логотип и меню.
+func _show_title() -> void:
+	state = "title"
+	fade = 0.0
+	gestures.enabled = false
+	_title_boss = Enemy.new()
+	_title_boss.passive = true
+	_title_boss.position = Vector3(0.0, 0.0, -5.2)
+	add_child(_title_boss)
+	var boss_data: Dictionary = cfg.enemies[run_cfg.boss].duplicate()
+	boss_data.appear_time = 4.0
+	_title_boss.setup(str(run_cfg.boss), boss_data, 1)
+	_title_boss.set_realistic(bool(style.realistic))
+	title = Title.new()
+	title.game = self
+	add_child(title)
+
+
+## Начать забег (с заставки или сразу).
+func start_run() -> void:
+	Engine.set_meta("title_seen", true)
+	if _title_boss != null:
+		_title_boss.queue_free()
+		_title_boss = null
+	title = null
+	gestures.enabled = true
+	_next_room()
+
+
+## Тлеющие искры в воздухе коридора: дешёвая атмосфера для всех стилей.
+func _spawn_embers() -> void:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(0.025, 0.025, 0.025)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.6, 0.2)
+	mesh.material = mat
+	var em := CPUParticles3D.new()
+	em.amount = 36
+	em.lifetime = 5.0
+	em.preprocess = 5.0
+	em.mesh = mesh
+	em.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	em.emission_box_extents = Vector3(1.8, 0.2, 4.5)
+	em.position = Vector3(0, 0.3, -4.0)
+	em.direction = Vector3(0, 1, 0)
+	em.spread = 25.0
+	em.gravity = Vector3(0, 0.15, 0)
+	em.initial_velocity_min = 0.2
+	em.initial_velocity_max = 0.6
+	em.scale_amount_min = 0.5
+	em.scale_amount_max = 1.6
+	add_child(em)
+
 
 func _next_room() -> void:
 	room_index += 1
@@ -417,10 +505,16 @@ func _room_cleared() -> void:
 	_finish_room(then)
 
 
+func _begin_cutscene() -> void:
+	state = "cutscene"
+	cut_t = 0.0
+	_shake = 0.0
+	cut_total = maxf(CUT_TIME, voice.say_sequence(["cut_1", "cut_2", "cut_3"], 0.5, 0.8) + 2.6)
+
+
 func _finish_room(then: String) -> void:
 	if then == "cutscene":
-		state = "cutscene"
-		cut_t = 0.0
+		_begin_cutscene()
 		return
 	state = "cleared"
 	_between_t = CLEARED_DELAY
@@ -546,8 +640,8 @@ func _apply_event(ev: Dictionary) -> void:
 func _run_cutscene(delta: float) -> void:
 	cut_t += delta
 	_set_dawn(smoothstep(0.8, 6.5, cut_t))
-	white = smoothstep(CUT_TIME - 2.2, CUT_TIME - 0.6, cut_t)
-	if cut_t >= CUT_TIME:
+	white = smoothstep(cut_total - 2.2, cut_total - 0.6, cut_t)
+	if cut_t >= cut_total:
 		state = "victory"
 		sfx.play("victory", -2.0)
 		_buzz(120)
@@ -649,7 +743,7 @@ func dev_cutscene() -> void:
 		_prop = null
 	fade = 0.0
 	stats.boss = 1
-	state = "cutscene"
+	_begin_cutscene()
 
 
 func dev_victory() -> void:
@@ -659,8 +753,10 @@ func dev_victory() -> void:
 
 
 func _walk_offset() -> float:
+	if state == "title":
+		return 0.6 + sin(_time * 0.25) * 0.35
 	if state == "cutscene" or (state == "victory" and cut_t > 0.0):
-		return -6.5 * smoothstep(1.2, CUT_TIME, cut_t)
+		return -6.5 * smoothstep(1.2, cut_total, cut_t)
 	if state != "walk":
 		return 0.0
 	var k := clampf(_walk_t / WALK_TIME, 0.0, 1.0)
@@ -746,7 +842,7 @@ func _animate_prop(delta: float) -> void:
 
 func on_gesture(kind: String) -> void:
 	if state == "victory" or state == "defeat":
-		if kind == "tap":
+		if kind == "tap" and hud.result_ready():
 			get_tree().reload_current_scene()
 		return
 	if state == "room":
@@ -755,7 +851,8 @@ func on_gesture(kind: String) -> void:
 		return
 	if state == "cutscene":
 		if kind == "tap" and cut_t > 1.0:
-			cut_t = maxf(cut_t, CUT_TIME - 1.2)     # тап пропускает сцену
+			cut_t = maxf(cut_t, cut_total - 1.2)     # тап пропускает сцену
+			voice.stop()
 		return
 	if state != "fight":
 		charging = false
@@ -922,17 +1019,39 @@ func _chips(pos: Vector3, amount: int, color: Color = Color(0.93, 0.9, 0.8)) -> 
 	e.restart()
 
 
-## Короткая «заморозка» на сильном ударе: придаёт ему вес. В автотестах отключена.
+## Короткая «заморозка» врага на сильном ударе: придаёт удару вес.
+## Замирает только враг (его логика и анимация), по настоящим часам. Общую скорость
+## игры не трогаем: застрявший Engine.time_scale замедлил бы всё, включая экран итога.
 func _hitstop(sec: float) -> void:
 	if sec <= 0.0 or autoplay or OS.get_cmdline_user_args().has("--devtest"):
 		return
-	if _hitstop_base < 0.0:
-		_hitstop_base = Engine.time_scale
-	Engine.time_scale = _hitstop_base * 0.05
-	await get_tree().create_timer(sec, true, false, true).timeout
-	if _hitstop_base >= 0.0:
-		Engine.time_scale = _hitstop_base
-		_hitstop_base = -1.0
+	if enemy == null or not enemy.is_alive():
+		return
+	_hitstop_until = maxi(_hitstop_until, Time.get_ticks_msec() + int(sec * 1000.0))
+	enemy.process_mode = Node.PROCESS_MODE_DISABLED
+
+
+## Музыка по состоянию игры: меню, подземелье, бой, босс; в кат-сцене и на итоге — тема меню.
+func _update_music() -> void:
+	var track := "dungeon"
+	match state:
+		"title", "victory", "cutscene":
+			track = "menu"
+		"defeat":
+			track = ""
+		"fight", "between", "loot":
+			track = "fight"
+	if state != "title" and room.get("kind", "") == "boss" and state in ["fight", "between", "walk"]:
+		track = "boss"
+	music.play(track)
+	music.duck(voice.subtitle != "")
+
+
+func _update_hitstop() -> void:
+	if _hitstop_until > 0 and Time.get_ticks_msec() >= _hitstop_until:
+		_hitstop_until = 0
+		if enemy != null:
+			enemy.process_mode = Node.PROCESS_MODE_INHERIT
 
 
 func _buzz(ms: int) -> void:
@@ -1036,9 +1155,11 @@ func _animate_view(delta: float) -> void:
 
 	# Щит поднимается при блоке; в кат-сцене руки опускаются
 	var shield_target := SHIELD_UP if block_t > 0.0 else SHIELD_REST
-	if cut_t > 0.0:
-		shield_target = SHIELD_REST + Vector3(0, -0.5, 0)
-	_sword.position = _sword.position.lerp(SWORD_POS + Vector3(0, -0.6 if cut_t > 0.0 else 0.0, 0), 1.0 - exp(-2.5 * delta))
+	var hands_down := cut_t > 0.0 or state == "title"
+	if hands_down:
+		shield_target = SHIELD_REST + Vector3(0, -0.6, 0)
+	_sword.position = _sword.position.lerp(SWORD_POS + Vector3(0, -0.8 if hands_down else 0.0, 0),
+		1.0 if state == "title" else 1.0 - exp(-2.5 * delta))
 	_shield.position = _shield.position.lerp(shield_target, 1.0 - exp(-22.0 * delta))
 
 	# Уклонение: камера уходит в сторону и возвращается
