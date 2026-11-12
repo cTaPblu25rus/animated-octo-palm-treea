@@ -18,6 +18,7 @@ const MetaUi := preload("res://scripts/meta_ui.gd")
 const PixelShader := preload("res://shaders/pixel.gdshader")
 const Voice := preload("res://scripts/voice.gd")
 const Title := preload("res://scripts/title.gd")
+const Music := preload("res://scripts/music.gd")
 const ITEMS_PATH := "res://data/items.json"
 const HERO_MODELS := "res://assets/kaykit/hero/"
 
@@ -99,6 +100,7 @@ var dev_menu: CanvasLayer
 var settings_menu: CanvasLayer
 var meta_ui: CanvasLayer
 var voice: Node
+var music: Node
 var title: CanvasLayer
 var cut_total := CUT_TIME        # длина кат-сцены: подстраивается под озвучку
 var _title_boss: Enemy
@@ -160,6 +162,7 @@ func _ready() -> void:
 
 	if not autoplay:
 		Engine.time_scale = 1.0     # страховка: скорость не должна «застрять» между сценами
+	Music.ensure_bus()
 	Settings.load_once()
 	Settings.apply_volume()
 	for a in OS.get_cmdline_user_args():
@@ -169,6 +172,8 @@ func _ready() -> void:
 	sfx = Sfx.new()
 	voice = Voice.new()
 	add_child(voice)
+	music = Music.new()
+	add_child(music)
 	add_child(sfx)
 	_build_room()
 	_build_camera()
@@ -243,6 +248,7 @@ func _load_json(path: String) -> Dictionary:
 func _process(delta: float) -> void:
 	_time += delta
 	_update_hitstop()
+	_update_music()
 	attack_cd = maxf(0.0, attack_cd - delta)
 	block_t = maxf(0.0, block_t - delta)
 	dodge_t = maxf(0.0, dodge_t - delta)
@@ -1023,6 +1029,22 @@ func _hitstop(sec: float) -> void:
 		return
 	_hitstop_until = maxi(_hitstop_until, Time.get_ticks_msec() + int(sec * 1000.0))
 	enemy.process_mode = Node.PROCESS_MODE_DISABLED
+
+
+## Музыка по состоянию игры: меню, подземелье, бой, босс; в кат-сцене и на итоге — тема меню.
+func _update_music() -> void:
+	var track := "dungeon"
+	match state:
+		"title", "victory", "cutscene":
+			track = "menu"
+		"defeat":
+			track = ""
+		"fight", "between", "loot":
+			track = "fight"
+	if state != "title" and room.get("kind", "") == "boss" and state in ["fight", "between", "walk"]:
+		track = "boss"
+	music.play(track)
+	music.duck(voice.subtitle != "")
 
 
 func _update_hitstop() -> void:

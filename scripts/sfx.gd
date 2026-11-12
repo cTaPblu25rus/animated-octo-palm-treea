@@ -33,7 +33,7 @@ func _ready() -> void:
 	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	wav.loop_end = wav.data.size() / 2
 	amb.stream = wav
-	amb.volume_db = -14.0
+	amb.volume_db = -22.0      # фон тише: поверх играет музыка
 	add_child(amb)
 	amb.play()
 
