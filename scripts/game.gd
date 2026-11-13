@@ -442,14 +442,7 @@ func _show_title() -> void:
 	state = "title"
 	fade = 0.0
 	gestures.enabled = false
-	_title_boss = Enemy.new()
-	_title_boss.passive = true
-	_title_boss.position = Vector3(0.0, 0.0, -5.2)
-	add_child(_title_boss)
-	var boss_data: Dictionary = cfg.enemies[run_cfg.boss].duplicate()
-	boss_data.appear_time = 4.0
-	_title_boss.setup(str(run_cfg.boss), boss_data, 1)
-	_title_boss.set_realistic(bool(style.realistic))
+	# Заставку закрывает иллюстрация, поэтому 3D-босса за ней больше не ставим
 	title = Title.new()
 	title.game = self
 	add_child(title)

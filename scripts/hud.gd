@@ -8,6 +8,7 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const Hero := preload("res://scripts/hero.gd")
+const BOSS_ART := preload("res://assets/art/boss.jpg")
 
 const GOLD := Color(0.96, 0.78, 0.36)
 const GOLD_DARK := Color(0.45, 0.3, 0.12)
@@ -357,6 +358,12 @@ func _on_draw() -> void:
 	# Заставка босса: чёрные полосы и имя
 	if _boss_card > 0.01 and enemy != null:
 		_letterbox(w, h, _boss_card)
+		# Портрет босса в золотой рамке над именем
+		var ph := h * 0.44
+		var pw := ph * 612.0 / 819.0
+		var pr := Rect2((w - pw) * 0.5, h * 0.155 + (1.0 - _boss_card) * 30.0, pw, ph)
+		_canvas.draw_style_box(_box_style(Color(INK, _boss_card), Color(GOLD, _boss_card), 3, 6), pr.grow(5.0))
+		_canvas.draw_texture_rect(BOSS_ART, pr, false, Color(1, 1, 1, _boss_card))
 		_ornament(Vector2(w * 0.5, h * 0.63), w * 0.6, Color(GOLD, _boss_card))
 		_text(enemy.display_name.to_upper(), Vector2(w * 0.5, h * 0.68), 38, Color(1.0, 0.3, 0.25, _boss_card))
 		_text("Страж Пепельной Короны", Vector2(w * 0.5, h * 0.72), 18, Color(PARCHMENT, _boss_card * 0.85))
@@ -542,10 +549,16 @@ func _draw_skills() -> void:
 		_canvas.draw_circle(c, 30.5, Color(col.darkened(0.72), 0.95) if open else Color(INK, 0.85))
 		var key := "skill_" + str(sk.icon)
 		if not _icons.has(key):
+			# Цветная иллюстрация умения (assets/art), иначе — одноцветный значок
+			var apath := "res://assets/art/skill_%s.png" % str(sk.id)
 			var ipath := "res://assets/icons/%s.png" % str(sk.icon)
-			_icons[key] = load(ipath) if ResourceLoader.exists(ipath) else null
+			_icons[key] = load(apath) if ResourceLoader.exists(apath) else (load(ipath) if ResourceLoader.exists(ipath) else null)
+			_icons[key + "_art"] = ResourceLoader.exists(apath)
 		var tex: Texture2D = _icons[key]
-		if tex != null:
+		if tex != null and bool(_icons[key + "_art"]):
+			var dim := 1.0 if ready else (0.45 if open else 0.25)
+			_canvas.draw_texture_rect(tex, Rect2(c - Vector2(30, 30), Vector2(60, 60)), false, Color(dim, dim, dim, 1.0))
+		elif tex != null:
 			var tint := col.lerp(Color.WHITE, 0.3) if ready else Color(col, 0.35 if open else 0.18)
 			_canvas.draw_texture_rect(tex, Rect2(c - Vector2(20, 20), Vector2(40, 40)), false, tint)
 		if not open:
