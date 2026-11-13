@@ -25,6 +25,8 @@ var _font: Font
 var _menu: VBoxContainer
 var _leaving := -1.0
 var _shade: GradientTexture2D
+var _art_corridor: Texture2D = preload("res://assets/art/title.jpg")
+var _art_outpost: Texture2D = preload("res://assets/art/outpost.jpg")
 
 
 func _ready() -> void:
@@ -100,6 +102,12 @@ func _on_draw() -> void:
 	var size := _canvas.size
 	var w := size.x
 	var h := size.y
+	# Иллюстрации: коридор с рыцарем во время загрузки, затем Застава Зари под меню.
+	# Медленный наезд камеры и плавная смена.
+	var menu_k := smoothstep(LOAD_TIME - 0.4, LOAD_TIME + 1.0, t)
+	_cover(_art_corridor, w, h, 1.0 + 0.06 * minf(1.0, t / 12.0), 1.0)
+	if menu_k > 0.0:
+		_cover(_art_outpost, w, h, 1.0 + 0.04 * minf(1.0, maxf(0.0, t - LOAD_TIME) / 14.0), menu_k)
 	_canvas.draw_texture_rect(_shade, Rect2(0, 0, w, h * 0.5), false)
 	_canvas.draw_texture_rect(_shade, Rect2(0, h, w, -h * 0.55), false)
 
@@ -148,6 +156,16 @@ func _on_draw() -> void:
 
 	if _leaving >= 0.0:
 		_canvas.draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.01, 0.03, clampf(_leaving / 0.6, 0.0, 1.0)))
+
+
+## Нарисовать картинку так, чтобы она закрыла весь экран (обрезка по краям), с масштабом и прозрачностью.
+func _cover(tex: Texture2D, w: float, h: float, zoom: float, alpha: float) -> void:
+	if tex == null:
+		return
+	var ts := tex.get_size()
+	var k := maxf(w / ts.x, h / ts.y) * zoom
+	var size := ts * k
+	_canvas.draw_texture_rect(tex, Rect2((Vector2(w, h) - size) * 0.5, size), false, Color(1, 1, 1, alpha))
 
 
 func _letters(word: String, center: Vector2, fsize: int, color: Color, start: float) -> void:
