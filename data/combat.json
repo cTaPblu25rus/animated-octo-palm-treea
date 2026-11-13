@@ -111,7 +111,7 @@
 			"model": "warrior",
 			"weapon": "axe",
 			"distance": 3.1,
-			"appear_time": 3.0,
+			"appear_time": 4.6,
 			"appear_anim": "Spawn_Ground_Skeletons",
 			"phases": [
 				{

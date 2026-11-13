@@ -24,6 +24,8 @@ var _canvas: Control
 var _font: Font
 var _menu: VBoxContainer
 var _leaving := -1.0
+var _intro := -1.0          # время вступления рассказчика; −1 — не идёт
+var _intro_len := 0.0
 var _shade: GradientTexture2D
 var _art_corridor: Texture2D = preload("res://assets/art/title.jpg")
 var _art_outpost: Texture2D = preload("res://assets/art/outpost.jpg")
@@ -68,25 +70,49 @@ func _ready() -> void:
 	var settings := _button("Настройки", 58, 20, false)
 	settings.pressed.connect(func() -> void: game.settings_menu.set_open(true))
 	_menu.add_child(settings)
-	game.voice.say_sequence(["title_1", "title_2", "title_3"], 0.5, 1.4)
 
 
 func is_ready() -> bool:
 	return t >= LOAD_TIME
 
 
+## «В бой»: в первый раз сначала идёт вступление рассказчика, потом забег.
 func start() -> void:
-	if _leaving >= 0.0:
+	if _leaving >= 0.0 or _intro >= 0.0:
 		return
-	_leaving = 0.0
 	_menu.visible = false
-	game.voice.stop()
 	game.sfx.play("parry", -4.0, 0.7)
+	if bool(Save.data.get("intro_seen", false)):
+		_leaving = 0.0
+		return
+	_intro = 0.0
+	_intro_len = game.voice.say_sequence(["title_1", "title_2", "title_3"], 0.6, 1.0) + 0.6
+
+
+## Закончить вступление (само или по тапу) и перейти к забегу.
+func _end_intro() -> void:
+	if _intro < 0.0:
+		return
+	_intro = -1.0
+	game.voice.stop()
+	Save.data.intro_seen = true
+	Save.save()
+	_leaving = 0.0
+
+
+func _input(event: InputEvent) -> void:
+	# Тап во время вступления пропускает его (не раньше чем через полсекунды)
+	if _intro > 0.5 and event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
+		_end_intro()
 
 
 func _process(delta: float) -> void:
 	t += delta
-	if is_ready() and _leaving < 0.0:
+	if _intro >= 0.0:
+		_intro += delta
+		if _intro >= _intro_len:
+			_end_intro()
+	if is_ready() and _leaving < 0.0 and _intro < 0.0:
 		_menu.visible = true
 		_menu.modulate.a = minf(1.0, _menu.modulate.a + delta * 2.5)
 	if _leaving >= 0.0:
@@ -108,6 +134,17 @@ func _on_draw() -> void:
 	_cover(_art_corridor, w, h, 1.0 + 0.06 * minf(1.0, t / 12.0), 1.0)
 	if menu_k > 0.0:
 		_cover(_art_outpost, w, h, 1.0 + 0.04 * minf(1.0, maxf(0.0, t - LOAD_TIME) / 14.0), menu_k)
+	# Вступление после «В бой»: коридор крупным планом, строки рассказчика, логотип и меню убраны
+	if _intro >= 0.0:
+		var ia := smoothstep(0.0, 0.8, _intro)
+		_cover(_art_corridor, w, h, 1.12 + 0.05 * _intro / maxf(1.0, _intro_len), ia)
+		_canvas.draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.01, 0.04, 0.35 * ia))
+		_canvas.draw_texture_rect(_shade, Rect2(0, h, w, -h * 0.5), false)
+		var line: String = game.voice.subtitle
+		if line != "":
+			_text(line, Vector2(w * 0.5, h * 0.8), 24, Color(PARCHMENT, 0.97))
+		_text("Тап — пропустить", Vector2(w * 0.5, h - 40), 14, Color(PARCHMENT, 0.5 * smoothstep(1.0, 2.0, _intro)))
+		return
 	_canvas.draw_texture_rect(_shade, Rect2(0, 0, w, h * 0.5), false)
 	_canvas.draw_texture_rect(_shade, Rect2(0, h, w, -h * 0.55), false)
 
@@ -132,11 +169,6 @@ func _on_draw() -> void:
 	_canvas.draw_line(Vector2(w * 0.5 - lw * 0.5, ly), Vector2(w * 0.5 + lw * 0.5, ly), Color(GOLD, line_a), 2.0)
 	_diamond(Vector2(w * 0.5, ly), 7.0 * line_a, Color(GOLD, line_a))
 	_text("Заря ещё вернётся", Vector2(w * 0.5, ly + 34), 19, Color(PARCHMENT, smoothstep(2.3, 3.0, t) * 0.85))
-
-	# Субтитры рассказчика
-	var sub: String = game.voice.subtitle
-	if sub != "" and _leaving < 0.0:
-		_text(sub, Vector2(w * 0.5, h * 0.56), 21, Color(PARCHMENT, 0.95))
 
 	# Загрузка с советами → меню
 	if not is_ready():
