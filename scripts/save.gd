@@ -13,6 +13,7 @@ static func defaults() -> Dictionary:
 	return {
 		"shards": 0, "gold": 0, "runs": 0, "wins": 0,
 		"xp": 0, "level": 1, "talents": {}, "intro_seen": false,
+		"tier": 0, "tier_max": 0,
 		"upgrades": {"hp": 0, "damage": 0, "stamina": 0, "parry": 0},
 		"weapon": {"id": "guard_sword", "rarity": 0, "level": 0, "affix": ""},
 	}

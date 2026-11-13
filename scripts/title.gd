@@ -4,6 +4,7 @@
 extends CanvasLayer
 
 const Save := preload("res://scripts/save.gd")
+const TierPicker := preload("res://scripts/tier_picker.gd")
 const GOLD := Color(0.96, 0.78, 0.36)
 const GOLD_DARK := Color(0.45, 0.3, 0.12)
 const INK := Color(0.07, 0.06, 0.09)
@@ -61,6 +62,7 @@ func _ready() -> void:
 	var play := _button("В БОЙ", 84, 30, true)
 	play.pressed.connect(start)
 	_menu.add_child(play)
+	_menu.add_child(TierPicker.new())
 	var talents := _button("Таланты", 58, 20, false)
 	talents.pressed.connect(func() -> void: game.meta_ui.show_talents())
 	_menu.add_child(talents)
@@ -184,7 +186,7 @@ func _on_draw() -> void:
 		_text(tip, Vector2(w * 0.5, by + 48), 15, Color(GOLD, ta * 0.9))
 	var d: Dictionary = Save.data
 	_text("Забегов: %d  ·  Побед: %d" % [int(d.runs) - 1, int(d.wins)], Vector2(w * 0.5, h - 44), 14, Color(PARCHMENT, 0.55))
-	_text("версия 0.4 · ранний доступ", Vector2(w * 0.5, h - 22), 12, Color(PARCHMENT, 0.35))
+	_text("версия 0.5 · ранний доступ", Vector2(w * 0.5, h - 22), 12, Color(PARCHMENT, 0.35))
 
 	if _leaving >= 0.0:
 		_canvas.draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.01, 0.03, clampf(_leaving / 0.6, 0.0, 1.0)))

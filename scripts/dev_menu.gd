@@ -15,6 +15,7 @@ const Settings := preload("res://scripts/settings.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const Hero := preload("res://scripts/hero.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 const Diag := preload("res://scripts/diag.gd")
 const SPEEDS := [1.0, 0.25, 0.5, 2.0, 4.0]
 const SOUNDS := ["swing", "hit", "crit", "parry", "block", "hurt", "windup", "stun", "dodge", "death", "victory"]
@@ -135,6 +136,7 @@ func _build() -> void:
 	_add("forge", _forge, "Открыть кузницу")
 	_add("levelup", _levelup, "+1 уровень героя")
 	_add("talents", _talents, "Открыть таланты")
+	_add("tiers", _tiers, "Открыть все Ступени Пепла")
 	_add("cooldowns", _cooldowns, "Сбросить перезарядку умений")
 	_add("wipe", _wipe, "Сбросить сохранение")
 
@@ -295,6 +297,13 @@ func _drop_legend() -> void:
 func _boon() -> void:
 	_set_open(false)
 	game.offer_boons()
+
+
+## Открывает все ступени; выбрать нужную можно в паузе, действует со следующего забега.
+func _tiers() -> void:
+	Save.data.tier_max = Difficulty.top()
+	Save.save()
+	game.hud.say("Все Ступени Пепла открыты: выбор в паузе", Color(1.0, 0.55, 0.3), 2.0)
 
 
 func _levelup() -> void:

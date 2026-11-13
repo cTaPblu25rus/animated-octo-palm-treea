@@ -17,6 +17,7 @@ const Items := preload("res://scripts/items.gd")
 const MetaUi := preload("res://scripts/meta_ui.gd")
 const Hero := preload("res://scripts/hero.gd")
 const Diag := preload("res://scripts/diag.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 const HERO_PATH := "res://data/hero.json"
 const PixelShader := preload("res://shaders/pixel.gdshader")
 const Voice := preload("res://scripts/voice.gd")
@@ -123,6 +124,9 @@ var _diag_state := ""
 var _diag_t := 0.0
 var _diag_frames := 0
 var _diag_ms := 0
+var tier := 0                   # Ступень Пепла этого забега
+var tier_mods: Dictionary = {}  # множители ступени: hp, damage, windup, idle, altar, regen
+var tier_unlocked := -1         # ступень, открытая победой в этом забеге (−1 — нет)
 var _room_guard := false        # талант «Несгибаемый»: первый удар в комнате не наносит урона
 var boons: Array[String] = []   # дары этого забега
 var alts: Array = []            # вторая дорога для каждой комнаты (или null)
@@ -175,6 +179,13 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="):
 			Save.data.level = int(a.trim_prefix("--level="))
+	Difficulty.load_once()
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--tier="):
+			Save.data.tier_max = int(a.trim_prefix("--tier="))
+			Save.data.tier = Save.data.tier_max
+	tier = Difficulty.selected()
+	tier_mods = Difficulty.mods(tier)
 	_migrate_upgrades()
 	run_cfg = _load_json(RUN_PATH)
 	run_seed = 1 if autoplay else int(_rng.randi() % 1000000)
@@ -247,6 +258,10 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--title"):
 		skip_title = false
 	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--uishots="):
+			var ui_shooter: Node = load("res://tools/ui_shot.gd").new()
+			ui_shooter.dir = a.trim_prefix("--uishots=")
+			add_child(ui_shooter)
 		if a.begins_with("--titleshots="):
 			var shooter: Node = load("res://tools/title_shot.gd").new()
 			shooter.dir = a.trim_prefix("--titleshots=")
@@ -351,6 +366,7 @@ func _spawn_next() -> void:
 	wave_index += 1
 	if wave_index >= wave.size():
 		var reward := int(run_cfg.elite.shards) if str(room.kind) == "elite" else int(run_cfg.fight_shards)
+		reward = roundi(reward * Difficulty.reward(tier, "shards"))
 		shards += reward
 		if str(room.kind) != "boss":
 			hud.say("Комната очищена  +%d оск." % reward, Color(1.0, 0.85, 0.4), 1.3)
@@ -360,9 +376,9 @@ func _spawn_next() -> void:
 	enemy = Enemy.new()
 	enemy.position = Vector3(0.0, 0.0, -float(cfg.enemies[id].get("distance", -ENEMY_POS.z)))
 	add_child(enemy)
-	var edata: Dictionary = cfg.enemies[id]
+	var edata: Dictionary = (cfg.enemies[id] as Dictionary).duplicate(true)
+	_scale_enemy(edata)
 	if str(room.kind) == "elite":
-		edata = edata.duplicate()
 		edata.hp = float(edata.hp) * float(run_cfg.elite.hp)
 		edata.damage = float(edata.damage) * float(run_cfg.elite.damage)
 		edata.name = "Элита: " + str(edata.name)
@@ -411,6 +427,21 @@ func _on_died() -> void:
 	enemy = null
 	state = "between"
 	_between_t = NEXT_ENEMY_DELAY
+
+
+## Сила врага растёт с глубиной комнаты и со Ступенью Пепла.
+func _scale_enemy(edata: Dictionary) -> void:
+	edata.hp = float(edata.hp) * float(tier_mods.hp) * Difficulty.depth(room_index, "hp")
+	edata.damage = float(edata.damage) * float(tier_mods.damage) * Difficulty.depth(room_index, "damage")
+	var floor_w := float(Difficulty.cfg.min_windup)
+	edata.windup = maxf(floor_w, float(edata.windup) * float(tier_mods.windup))
+	edata.idle_min = float(edata.idle_min) * float(tier_mods.idle)
+	edata.idle_max = float(edata.idle_max) * float(tier_mods.idle)
+	if edata.has("reflect"):
+		edata.reflect = float(edata.reflect) * float(tier_mods.hp)
+	for ph: Dictionary in edata.get("phases", []):
+		if ph.has("windup"):
+			ph.windup = maxf(floor_w, float(ph.windup) * float(tier_mods.windup))
 
 
 ## Враг ударил. Исход решают уклонение, блок и стойкость игрока.
@@ -498,6 +529,11 @@ func start_run() -> void:
 		_title_boss = null
 	title = null
 	gestures.enabled = true
+	# Ступень могли сменить на заставке: фиксируем её на весь забег
+	tier = Difficulty.selected()
+	tier_mods = Difficulty.mods(tier)
+	recalc()
+	Diag.note("забег: ступень %d, сид %d" % [tier, run_seed])
 	_next_room()
 
 
@@ -580,6 +616,7 @@ func _room_cleared() -> void:
 	if kind == "boss":
 		stats.boss = 1
 		Save.data.wins = int(Save.data.wins) + 1
+		tier_unlocked = Difficulty.on_win(tier)
 	persist()
 	# Очередь того, что показать после комнаты: добыча, дар, затем развилка или переход
 	_steps.clear()
@@ -664,6 +701,7 @@ func _on_loot_chosen(take: bool) -> void:
 func gain_xp(amount: int) -> void:
 	if amount <= 0:
 		return
+	amount = roundi(amount * Difficulty.reward(tier, "xp"))
 	run_xp += amount
 	var ups := Hero.add_xp(hero_cfg, amount)
 	if ups > 0:
@@ -891,7 +929,7 @@ func recalc() -> void:
 	p.crit_mult = float(p.crit_mult) + 0.25 * Hero.rank("s4")
 	p.block_cost = float(p.block_cost) * (1.0 - 0.2 * Hero.rank("d3"))
 	p.dodge_cost = float(p.dodge_cost) * (1.0 - 0.25 * Hero.rank("a3"))
-	p.stamina_regen = float(p.stamina_regen) * (1.0 + 0.15 * Hero.rank("a4"))
+	p.stamina_regen = float(p.stamina_regen) * (1.0 + 0.15 * Hero.rank("a4")) * float(tier_mods.get("regen", 1.0))
 	p.charge_mult = float(p.charge_mult) * float(weapon.charge)
 	p.parry_window = float(p.parry_window) + 0.015 * Hero.rank("d2")
 	var old_max := max_hp
@@ -925,12 +963,13 @@ func _use_room() -> void:
 		return
 	match str(room.kind):
 		"chest":
-			shards += int(room.shards)
+			var chest_shards := roundi(float(room.shards) * Difficulty.reward(tier, "shards"))
+			shards += chest_shards
 			gold += int(room.gold)
 			sfx.play("block", -4.0, 0.7)
-			hud.say("Осколки +%d   Золото +%d" % [int(room.shards), int(room.gold)], Color(1.0, 0.85, 0.4), 1.5)
+			hud.say("Осколки +%d   Золото +%d" % [chest_shards, int(room.gold)], Color(1.0, 0.85, 0.4), 1.5)
 		"altar":
-			var heal := max_hp * float(room.heal)
+			var heal := max_hp * float(room.heal) * float(tier_mods.altar)
 			hp = minf(max_hp, hp + heal)
 			sfx.play("stun", -4.0, 0.6)
 			hud.say("Свет Зари исцеляет: +%d" % roundi(heal), Color(0.6, 0.85, 1.0), 1.5)

@@ -4,6 +4,7 @@
 extends CanvasLayer
 
 const Settings := preload("res://scripts/settings.gd")
+const TierPicker := preload("res://scripts/tier_picker.gd")
 const GOLD := Color(0.96, 0.78, 0.36)
 const GOLD_DARK := Color(0.45, 0.3, 0.12)
 const INK := Color(0.07, 0.06, 0.09)
@@ -19,6 +20,7 @@ var _volume: HSlider
 var _vibro: Button
 var _effects: Button
 var _boons: Label
+var _tier: HBoxContainer
 
 
 func _ready() -> void:
@@ -80,13 +82,13 @@ func _build() -> void:
 	add_child(_panel)
 
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 12)
+	v.add_theme_constant_override("separation", 8)
 	_panel.add_child(v)
 	v.add_child(_label("ПАУЗА", 34, GOLD, true))
 	v.add_child(_label("Графика", 17, Color(PARCHMENT, 0.7), false))
 	for id: String in Settings.STYLE_ORDER:
 		var st: Dictionary = Settings.STYLES[id]
-		var b := _button("%s\n%s" % [st.name, st.hint], 74)
+		var b := _button("%s\n%s" % [st.name, st.hint], 64)
 		b.pressed.connect(set_style.bind(id))
 		v.add_child(b)
 		_style_buttons[id] = b
@@ -144,6 +146,8 @@ func _build() -> void:
 	var forge := _button("Кузница: заточка оружия", 56)
 	forge.pressed.connect(func() -> void: game.meta_ui.show_forge())
 	v.add_child(forge)
+	_tier = TierPicker.new()
+	v.add_child(_tier)
 	var restart := _button("Новый забег", 52)
 	restart.pressed.connect(func() -> void:
 		Settings.save()
@@ -164,6 +168,7 @@ func _refresh() -> void:
 	for id: String in game.boons:
 		names.append(str(game.boons_cfg[id].name))
 	_boons.text = "Дары забега: " + (", ".join(names) if not names.is_empty() else "пока нет")
+	_tier.refresh()
 	_vibro.text = "Вибрация: %s" % ("вкл" if Settings.vibration else "выкл")
 	_effects.text = "Цветовые эффекты: %s" % ("вкл (может зависать)" if Settings.effects else "выкл — безопасный режим")
 	# Пиксельный стиль — это шейдер экрана, без эффектов он недоступен

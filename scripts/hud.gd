@@ -8,6 +8,7 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const Hero := preload("res://scripts/hero.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 const BOSS_ART := preload("res://assets/art/boss.jpg")
 
 const GOLD := Color(0.96, 0.78, 0.36)
@@ -379,6 +380,8 @@ func _on_draw() -> void:
 			_text(str(game.KIND_NAMES[kind]), Vector2(w * 0.5, h * 0.47), 30, Color(PARCHMENT, game.fade))
 			_text("Комната %d из %d" % [game.room_index + 1, game.rooms.size()], Vector2(w * 0.5, h * 0.51), 17,
 				Color(GOLD, game.fade * 0.9))
+			if game.tier > 0:
+				_text("Ступень Пепла %d" % game.tier, Vector2(w * 0.5, h * 0.545), 15, Color(1.0, 0.5, 0.3, game.fade * 0.9))
 
 	if game.state == "cutscene" or (game.state == "victory" and game.cut_t > 0.0):
 		_draw_cutscene(w, h)
@@ -649,7 +652,7 @@ func _draw_result(w: float, h: float) -> void:
 	var ok: bool = game.state == "victory"
 	_canvas.draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.01, 0.04, 0.6 * a))
 	var slide := (1.0 - smoothstep(0.0, 0.45, _result_t)) * 60.0
-	var panel := Rect2(w * 0.07, h * 0.22 + slide, w * 0.86, 430)
+	var panel := Rect2(w * 0.07, h * 0.22 + slide, w * 0.86, 460)
 	_canvas.draw_style_box(_box_style(Color(0.12, 0.09, 0.13, 0.96 * a), Color(GOLD, a), 3, 18), panel)
 	_canvas.draw_style_box(_box_style(Color(0, 0, 0, 0), Color(GOLD_DARK, a), 1, 13), panel.grow(-8))
 	var cx := w * 0.5
@@ -673,6 +676,7 @@ func _draw_result(w: float, h: float) -> void:
 
 	y += 62
 	var rows := [
+		["Ступень Пепла", "%d · %s" % [game.tier, Difficulty.title(game.tier)]],
 		["Комнат пройдено", "%d из %d" % [s.rooms, game.rooms.size()]],
 		["Точных ударов", str(s.weak_hits)],
 		["Парирований", str(s.parries)],
@@ -688,6 +692,9 @@ func _draw_result(w: float, h: float) -> void:
 		y += 30
 	_text("Сид забега: %d" % game.run_seed, Vector2(cx, panel.end.y - 18), 12, Color(PARCHMENT, 0.45 * a))
 	if _result_t > 1.6:
+		if game.tier_unlocked > 0:
+			_text("Открыта Ступень Пепла %d: %s" % [game.tier_unlocked, Difficulty.title(game.tier_unlocked)],
+				Vector2(cx, panel.end.y + 126), 16, Color(1.0, 0.55, 0.3))
 		if Hero.points() > 0:
 			_text("Есть свободные очки талантов: %d" % Hero.points(), Vector2(cx, panel.end.y + 100), 15, Color(0.6, 1.0, 0.6))
 		_text("II — таланты, кузница и настройки", Vector2(cx, panel.end.y + 76), 15, Color(GOLD, 0.8))

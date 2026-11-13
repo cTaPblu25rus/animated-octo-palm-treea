@@ -8,6 +8,7 @@ const Enemy := preload("res://scripts/enemy.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const Hero := preload("res://scripts/hero.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 const STAGE := "dev_test_stage"
 
 var game: Node
@@ -30,6 +31,19 @@ func _ready() -> void:
 func _run() -> void:
 	var dev: Node = game.dev_menu
 	_check(dev != null, "меню создано в debug-сборке")
+
+	# Ступени Пепла: правила накапливаются, победа открывает следующую, закрытую выбрать нельзя
+	var m3: Dictionary = Difficulty.mods(3)
+	_check(is_equal_approx(float(m3.hp), 1.15) and is_equal_approx(float(m3.damage), 1.12) and float(m3.windup) < 1.0,
+		"ступени: правила накапливаются")
+	_check(Difficulty.on_win(0) == 1 and Difficulty.unlocked() == 1, "ступени: победа открывает следующую")
+	Difficulty.select(5)
+	_check(Difficulty.selected() == 1, "ступени: закрытую выбрать нельзя")
+	_check(Difficulty.on_win(0) == -1, "ступени: победа ниже высшей ничего не открывает")
+	Save.data.tier = 0
+	Save.data.tier_max = 0
+	_check(Difficulty.depth(6, "hp") > Difficulty.depth(0, "hp") and is_equal_approx(Difficulty.depth(0, "hp"), 1.0),
+		"враги сильнее в глубине забега")
 	await _until(func() -> bool: return game.state == "fight" and game.enemy != null)
 	await _wait(1.2)
 
