@@ -15,6 +15,7 @@ const Settings := preload("res://scripts/settings.gd")
 const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const Hero := preload("res://scripts/hero.gd")
+const Diag := preload("res://scripts/diag.gd")
 const SPEEDS := [1.0, 0.25, 0.5, 2.0, 4.0]
 const SOUNDS := ["swing", "hit", "crit", "parry", "block", "hurt", "windup", "stun", "dodge", "death", "victory"]
 const META := "dev_menu"
@@ -161,6 +162,8 @@ func _build() -> void:
 	_add("style", _cycle_style)
 	_add("sound", _test_sound)
 	_add("buzz", _test_buzz, "Тест вибрации")
+	_add("log", _show_log, "Журнал прошлого запуска")
+	_add("log_now", _show_log_now, "Журнал этого запуска")
 
 	var close := Button.new()
 	close.text = "Закрыть"
@@ -422,6 +425,49 @@ func _cycle_style() -> void:
 func _test_sound() -> void:
 	game.sfx.play(SOUNDS[_sound_i])
 	_sound_i = (_sound_i + 1) % SOUNDS.size()
+
+
+func _show_log() -> void:
+	_log_view(Diag.previous(70))
+
+
+func _show_log_now() -> void:
+	var path := "user://log_current.txt"
+	var lines := FileAccess.get_file_as_string(path).split("\n", false) if FileAccess.file_exists(path) else PackedStringArray()
+	_log_view("\n".join(lines.slice(maxi(0, lines.size() - 70))))
+
+
+## Окно с текстом журнала поверх меню: его удобно сфотографировать и прислать.
+func _log_view(text: String) -> void:
+	var box := PanelContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.03, 0.03, 0.05, 0.98)
+	bg.set_content_margin_all(10)
+	box.add_theme_stylebox_override("panel", bg)
+	var v := VBoxContainer.new()
+	box.add_child(v)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(scroll)
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75))
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size = Vector2(500, 0)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(label)
+	var close := Button.new()
+	close.text = "Закрыть журнал"
+	close.custom_minimum_size = Vector2(0, 60)
+	close.pressed.connect(box.queue_free)
+	v.add_child(close)
+	add_child(box)
+	# Прокрутить к последним строкам
+	await get_tree().process_frame
+	await get_tree().process_frame
+	scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value)
 
 
 func _test_buzz() -> void:

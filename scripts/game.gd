@@ -16,6 +16,7 @@ const Save := preload("res://scripts/save.gd")
 const Items := preload("res://scripts/items.gd")
 const MetaUi := preload("res://scripts/meta_ui.gd")
 const Hero := preload("res://scripts/hero.gd")
+const Diag := preload("res://scripts/diag.gd")
 const HERO_PATH := "res://data/hero.json"
 const PixelShader := preload("res://shaders/pixel.gdshader")
 const Voice := preload("res://scripts/voice.gd")
@@ -118,6 +119,10 @@ var boons_cfg: Dictionary = {}  # data/boons.json
 var hero_cfg: Dictionary = {}   # data/hero.json: уровни, таланты, умения
 var run_xp := 0                 # опыт, набранный за этот забег
 var skill_cd: Array[float] = [0.0, 0.0, 0.0]
+var _diag_state := ""
+var _diag_t := 0.0
+var _diag_frames := 0
+var _diag_ms := 0
 var _room_guard := false        # талант «Несгибаемый»: первый удар в комнате не наносит урона
 var boons: Array[String] = []   # дары этого забега
 var alts: Array = []            # вторая дорога для каждой комнаты (или null)
@@ -184,6 +189,9 @@ func _ready() -> void:
 
 	if not autoplay:
 		Engine.time_scale = 1.0     # страховка: скорость не должна «застрять» между сценами
+	Diag.start()
+	get_viewport().size_changed.connect(func() -> void:
+		Diag.note("размер окна %s" % str(get_viewport().get_visible_rect().size)))
 	Music.ensure_bus()
 	Settings.load_once()
 	Settings.apply_volume()
@@ -269,8 +277,42 @@ func _load_json(path: String) -> Dictionary:
 
 # ============================================================ ход боя
 
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_PAUSED:
+			Diag.note("приложение на паузе (свернуто или перекрыто)")
+		NOTIFICATION_APPLICATION_RESUMED:
+			Diag.note("приложение возобновлено")
+		NOTIFICATION_APPLICATION_FOCUS_OUT:
+			Diag.note("потерян фокус")
+		NOTIFICATION_APPLICATION_FOCUS_IN:
+			Diag.note("фокус вернулся")
+		NOTIFICATION_OS_MEMORY_WARNING:
+			Diag.note("СИСТЕМА: мало памяти")
+		NOTIFICATION_WM_CLOSE_REQUEST:
+			Diag.note("закрытие")
+
+
+## Журнал: строка на смену состояния и «пульс» раз в секунду с частотой кадров.
+func _update_diag(delta: float) -> void:
+	if state != _diag_state:
+		_diag_state = state
+		Diag.note("состояние %s · комната %d/%d %s · враг %s · hp %d" % [state, room_index + 1, rooms.size(),
+			str(room.get("kind", "")), enemy.id if enemy != null else "-", hp])
+	_diag_t += delta
+	_diag_frames += 1
+	var now := Time.get_ticks_msec()
+	if now - _diag_ms >= 1000:
+		Diag.note("пульс %s · кадров/с %d · игровое время +%.2f · отрисовано %d · %.0f МБ" % [state, _diag_frames,
+			_diag_t, Engine.get_frames_drawn(), Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0])
+		_diag_ms = now
+		_diag_frames = 0
+		_diag_t = 0.0
+
+
 func _process(delta: float) -> void:
 	_time += delta
+	_update_diag(delta)
 	_update_hitstop()
 	_update_music()
 	_update_burn(delta)
@@ -594,6 +636,7 @@ func _roll_drop(kind: String) -> Dictionary:
 
 
 func offer_loot(w: Dictionary) -> void:
+	Diag.note("добыча: %s, редкость %d" % [str(w.id), int(w.rarity)])
 	stats.drops += 1
 	sfx.play("victory", -8.0, 1.5)
 	meta_ui.show_loot(w)
@@ -946,7 +989,13 @@ func _set_dawn(k: float) -> void:
 ## Применить стиль графики из настроек: свет, туман, цветокоррекция. Можно звать на лету.
 func apply_style() -> void:
 	style = Settings.current()
-	_env.adjustment_enabled = true
+	# Безопасный режим (по умолчанию): без цветовой обработки, сглаживания и шейдера экрана.
+	# Стиль тогда задают только свет, туман и тонировка интерфейса.
+	var fx := Settings.effects
+	_env.adjustment_enabled = fx
+	_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC if fx else Environment.TONE_MAPPER_LINEAR
+	get_viewport().msaa_3d = Viewport.MSAA_2X if fx else Viewport.MSAA_DISABLED
+	Diag.note("стиль %s, эффекты %s" % [Settings.style, "вкл" if fx else "выкл"])
 	_lantern.light_color = style.lantern
 	_lantern.light_energy = float(style.lantern_energy)
 	for t in _torches:
@@ -954,7 +1003,7 @@ func apply_style() -> void:
 	_set_dawn(dawn)
 
 	# Пиксельный стиль: шейдер поверх 3D-сцены, под интерфейсом
-	var px := float(style.pixel)
+	var px := float(style.pixel) if fx else 0.0
 	_pixel_rect.visible = px > 0.0
 	if px > 0.0:
 		(_pixel_rect.material as ShaderMaterial).set_shader_parameter("pixel_size", px)

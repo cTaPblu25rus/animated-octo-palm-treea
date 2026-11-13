@@ -17,6 +17,7 @@ var _panel: PanelContainer
 var _style_buttons := {}
 var _volume: HSlider
 var _vibro: Button
+var _effects: Button
 var _boons: Label
 
 
@@ -90,6 +91,13 @@ func _build() -> void:
 		v.add_child(b)
 		_style_buttons[id] = b
 
+	_effects = _button("", 60)
+	_effects.pressed.connect(func() -> void:
+		Settings.effects = not Settings.effects
+		game.apply_style()
+		_refresh())
+	v.add_child(_effects)
+
 	v.add_child(_label("Общая громкость", 17, Color(PARCHMENT, 0.7), false))
 	_volume = HSlider.new()
 	_volume.min_value = 0.0
@@ -157,6 +165,11 @@ func _refresh() -> void:
 		names.append(str(game.boons_cfg[id].name))
 	_boons.text = "Дары забега: " + (", ".join(names) if not names.is_empty() else "пока нет")
 	_vibro.text = "Вибрация: %s" % ("вкл" if Settings.vibration else "выкл")
+	_effects.text = "Цветовые эффекты: %s" % ("вкл (может зависать)" if Settings.effects else "выкл — безопасный режим")
+	# Пиксельный стиль — это шейдер экрана, без эффектов он недоступен
+	var px: Button = _style_buttons["pixel"]
+	px.disabled = not Settings.effects
+	px.modulate.a = 1.0 if Settings.effects else 0.45
 
 
 func _label(text: String, size: int, color: Color, center: bool) -> Label:

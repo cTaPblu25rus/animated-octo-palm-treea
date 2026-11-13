@@ -53,6 +53,9 @@ static var style := "toon"
 static var volume := 1.0
 static var music := 0.7
 static var vibration := true
+## Цветовая обработка картинки и сглаживание. Выключено по умолчанию: на части телефонов
+## (GL Compatibility) эти проходы отрисовки приводят к зависанию изображения.
+static var effects := false
 static var _loaded := false
 
 
@@ -68,6 +71,7 @@ static func load_once() -> void:
 	volume = clampf(float(cf.get_value("game", "volume", volume)), 0.0, 1.0)
 	music = clampf(float(cf.get_value("game", "music", music)), 0.0, 1.0)
 	vibration = bool(cf.get_value("game", "vibration", vibration))
+	effects = bool(cf.get_value("game", "effects", effects))
 
 
 static func save() -> void:
@@ -76,6 +80,7 @@ static func save() -> void:
 	cf.set_value("game", "volume", volume)
 	cf.set_value("game", "music", music)
 	cf.set_value("game", "vibration", vibration)
+	cf.set_value("game", "effects", effects)
 	cf.save(PATH)
 
 
