@@ -309,7 +309,7 @@ func _process(delta: float) -> void:
 	_last_ms = now
 	_result_t = _result_t + real_delta if ended else 0.0
 	var boss_intro := enemy != null and enemy.is_boss and enemy.state == Enemy.State.APPEAR
-	_boss_card = move_toward(_boss_card, 1.0 if boss_intro else 0.0, delta * 2.5)
+	_boss_card = move_toward(_boss_card, 1.0 if boss_intro else 0.0, delta * (2.5 if boss_intro else 6.0))
 	_canvas.queue_redraw()
 
 
@@ -357,6 +357,8 @@ func _on_draw() -> void:
 
 	# Заставка босса: чёрные полосы и имя
 	if _boss_card > 0.01 and enemy != null:
+		# Сцену за карточкой затемняем, чтобы 3D-модель не просвечивала сквозь портрет
+		_canvas.draw_rect(Rect2(0, 0, w, h), Color(0.02, 0.01, 0.04, 0.78 * _boss_card))
 		_letterbox(w, h, _boss_card)
 		# Портрет босса в золотой рамке над именем
 		var ph := h * 0.44
